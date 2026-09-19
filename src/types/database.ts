@@ -527,7 +527,7 @@ export type Database = {
           score: number
           score_metadata: Json
           session_id: string
-          singer_1_id: string
+          singer_1_id: string | null
           singer_2_id: string | null
           song_id: string
           state: Database["public"]["Enums"]["session_song_state"]
@@ -544,7 +544,7 @@ export type Database = {
           score?: number
           score_metadata?: Json
           session_id: string
-          singer_1_id: string
+          singer_1_id?: string | null
           singer_2_id?: string | null
           song_id: string
           state?: Database["public"]["Enums"]["session_song_state"]
@@ -561,7 +561,7 @@ export type Database = {
           score?: number
           score_metadata?: Json
           session_id?: string
-          singer_1_id?: string
+          singer_1_id?: string | null
           singer_2_id?: string | null
           song_id?: string
           state?: Database["public"]["Enums"]["session_song_state"]

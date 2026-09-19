@@ -102,6 +102,10 @@ function historyState(memberIds: string[], history: QueueHistoryItem[]): EngineS
 
   history.forEach((item, index) => {
     const [a, b] = item.singerIds;
+    if (!a) {
+      previous = null;
+      return;
+    }
     turns.set(a, (turns.get(a) ?? 0) + 1);
     lastSeen.set(a, index);
     if (b) {
@@ -267,8 +271,9 @@ function buildRandomCandidates(input: GeneratePlaylistInput) {
 /**
  * Random mode deliberately ignores overlap, priority, favorite, fairness and
  * history scoring. It samples distinct songs uniformly from the union of the
- * selected attendees' playlists. A song known by one attendee is a solo entry;
- * a song known by multiple attendees receives two randomly selected valid singers.
+ * selected attendees' playlists. Random mode deliberately leaves both singer
+ * slots empty: eligibleSingerIds records whose playlists contain the song so
+ * the UI can show its source without assigning anyone to perform it.
  */
 export function generateRandomPlaylist(input: GeneratePlaylistInput): SongRecommendation[] {
   const cfg = { ...DEFAULT_RECOMMENDATION_CONFIG, ...input.config };
@@ -288,11 +293,10 @@ export function generateRandomPlaylist(input: GeneratePlaylistInput): SongRecomm
   };
 
   return candidates.slice(0, cap).map(candidate => {
-    const singers = shuffled(candidate.eligibleSingerIds, random);
     return {
       song: candidate.song,
       eligibleSingerIds: candidate.eligibleSingerIds,
-      singerIds: [singers[0], singers[1] ?? null],
+      singerIds: [null, null],
       matchCount: candidate.eligibleSingerIds.length,
       totalParticipants: new Set(input.selectedMemberIds).size,
       score: 0,

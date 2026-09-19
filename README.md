@@ -10,7 +10,7 @@ Production URL: <https://tranthaigin.github.io/ginkaraoke/>
 2. Confirm a display profile, then create a group or join with a code.
 3. Maintain your own songs, favorites, and priorities.
 4. Create a Karaoke Session and select only the friends attending.
-5. Generate up to 50 unused duet songs. Every entry has exactly two selected singers who both know the song.
+5. Choose Smart mode for valid, fair duet assignments, or Random mode for up to 50 songs sampled from the selected members' playlists without assigning performers.
 6. Mark songs played, undo, remove, or move them upward. Generate another batch without repeating queued or played songs.
 7. After all unused songs are exhausted, recycling is available only after explicit confirmation.
 
@@ -46,6 +46,7 @@ The target project is `Karaokegroup`. Apply migrations in timestamp order with t
 1. `supabase/migrations/20260919061727_20260915_init.sql` represents the legacy demo model.
 2. `supabase/migrations/20260919061730_20260919_authenticated_model.sql` preserves those tables under `legacy_*`, revokes their API access, and creates the authenticated final model.
 3. `supabase/migrations/20260919062215_20260919_remote_hardening.sql` backfills pre-migration Auth users and tightens queue relationships, mutable columns, and singer eligibility.
+4. Later feature migrations add group dissolution, session selection modes, and enforce that Random queues store playlist sources without assigning singers.
 
 For a fresh environment, apply all files. The resulting schema creates:
 
@@ -72,6 +73,8 @@ Google's OAuth callback remains the Supabase callback shown in the provider setu
 `src/services/recommendation/engine.ts` is independent of React and Supabase. Compatibility has the dominant weight. The engine then applies centralized favorite/priority, partner diversity, turn fairness, rest, repeated-pair, consecutive-singer, and weak recent-history signals.
 
 Normal batches exclude every song already queued or played in the current session. State from earlier batches contributes to pair/turn fairness. Solo-only songs are excluded from the main duet queue. Recycle mode is an explicit input and never activates automatically.
+
+Random mode uses a uniform shuffle over distinct songs in the union of the selected attendees' playlists. It ignores compatibility, priority, favorites, and turn scoring, and never assigns singers. Each queue row retains the selected members whose playlists contain the song so the UI can show its source on demand.
 
 ## Quality checks
 
@@ -104,6 +107,6 @@ The PWA caches the application shell and static assets. An offline badge is show
 - All user/group/session tables have RLS.
 - Playlist writes require `user_id = auth.uid()`.
 - Group/session reads require membership; joining by code is a narrow `SECURITY DEFINER` RPC with an empty `search_path`.
-- Singer IDs must be distinct, selected session members, and members of the persisted eligible-singer array.
+- Smart-mode singer IDs must be distinct, selected session members, and members of the persisted eligible-singer array. Random-mode queue rows must leave both singer IDs empty.
 - The group owner cannot silently edit other users' playlists.
 - Old JSON ownership restore was removed because it was incompatible with authenticated cloud ownership and could become an authorization bypass.

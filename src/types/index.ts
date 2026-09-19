@@ -105,7 +105,7 @@ export interface SessionSong {
   session_id: string;
   batch_id: string;
   song_id: string;
-  singer_1_id: string;
+  singer_1_id: string | null;
   singer_2_id: string | null;
   eligible_singer_ids: string[];
   state: SessionSongState;
@@ -123,14 +123,14 @@ export interface SessionSong {
 
 export interface QueueHistoryItem {
   songId: string;
-  singerIds: [string, string | null];
+  singerIds: [string | null, string | null];
   state: SessionSongState;
 }
 
 export interface SongRecommendation {
   song: Song;
   eligibleSingerIds: string[];
-  singerIds: [string, string | null];
+  singerIds: [string | null, string | null];
   matchCount: number;
   totalParticipants: number;
   score: number;

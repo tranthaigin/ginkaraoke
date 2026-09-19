@@ -55,7 +55,7 @@ export function HistoryPage() {
         </span>
         <h1 style={{ fontSize: '1.6rem', marginTop: '4px' }}>Lịch sử những buổi hát</h1>
         <p className="muted" style={{ fontSize: '0.84rem', marginTop: '2px' }}>
-          Lưu lại người hát, bài hát đã thể hiện và kỷ niệm của hội bạn.
+          Lưu lại người tham gia, bài hát và kỷ niệm của hội bạn.
         </p>
       </section>
 
@@ -177,10 +177,12 @@ export function HistoryPage() {
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem' }}>Đang tải chi tiết…</p>
                     ) : (
                       <>
-                        {/* Member turns */}
+                        {/* Smart sessions track assigned turns; random sessions only track source playlists. */}
                         <div style={{ marginBottom: '14px' }}>
                           <div style={{ fontSize: '0.72rem', color: 'var(--cyan-400)', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '8px' }}>
-                            LƯỢT HÁT CỦA CÁC THÀNH VIÊN:
+                            {session.selection_mode === 'RANDOM'
+                              ? 'PLAYLIST NGUỒN ĐÃ CHỌN:'
+                              : 'LƯỢT HÁT CỦA CÁC THÀNH VIÊN:'}
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                             {data.members.map(member => (
@@ -198,10 +200,10 @@ export function HistoryPage() {
                                 }}
                               >
                                 <MemberAvatar profile={member} size="xs" />
-                                <span>{member.display_name}:</span>
-                                <strong style={{ color: 'var(--neon-cyan)' }}>
+                                <span>{member.display_name}</span>
+                                {session.selection_mode !== 'RANDOM' && <strong style={{ color: 'var(--neon-cyan)' }}>
                                   {stats?.turnsByMember[member.id] ?? 0} lượt
-                                </strong>
+                                </strong>}
                               </div>
                             ))}
                           </div>
@@ -250,8 +252,11 @@ export function HistoryPage() {
                                       whiteSpace: 'nowrap',
                                     }}
                                   >
-                                    {names.get(song.singer_1_id)}
-                                    {song.singer_2_id ? ` + ${names.get(song.singer_2_id)}` : ' · Solo'}
+                                    {session.selection_mode === 'RANDOM'
+                                      ? `Có trong: ${song.eligible_singer_ids.map(id => names.get(id)).filter(Boolean).join(', ')}`
+                                      : song.singer_1_id
+                                        ? `${names.get(song.singer_1_id)}${song.singer_2_id ? ` + ${names.get(song.singer_2_id)}` : ' · Solo'}`
+                                        : 'Chưa phân công'}
                                   </span>
                                 </div>
                               ))}
@@ -278,18 +283,20 @@ export function HistoryPage() {
                           }}
                         >
                           <Users size={13} color="var(--neon-purple)" />
-                          <span>
-                            {Object.keys(stats?.pairCounts ?? {}).length} cặp khác nhau
-                          </span>
-                          <span>·</span>
-                          <span>
-                            {Object.values(stats?.pairCounts ?? {}).reduce(
-                              (sum, count) => sum + Math.max(0, count - 1),
-                              0
-                            )}{' '}
-                            lượt lặp lại cặp
-                          </span>
-                          <span>·</span>
+                          {session.selection_mode === 'RANDOM' ? (
+                            <span>{data.members.length} playlist nguồn · Không phân công người hát</span>
+                          ) : <>
+                            <span>{Object.keys(stats?.pairCounts ?? {}).length} cặp khác nhau</span>
+                            <span>·</span>
+                            <span>
+                              {Object.values(stats?.pairCounts ?? {}).reduce(
+                                (sum, count) => sum + Math.max(0, count - 1),
+                                0
+                              )}{' '}
+                              lượt lặp lại cặp
+                            </span>
+                            <span>·</span>
+                          </>}
                           <span>{data.batches.length} lượt tạo danh sách</span>
                         </div>
                       </>

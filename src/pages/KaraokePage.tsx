@@ -369,7 +369,7 @@ export function KaraokePage() {
                     <Shuffle size={20} />
                     <span>
                       <strong>Ngẫu nhiên thuần túy</strong>
-                      <small>Lấy ngẫu nhiên từ các playlist đã chọn, không chấm điểm hay đòi bài trùng.</small>
+                      <small>Lấy ngẫu nhiên tối đa 50 bài, không chấm điểm và không phân công người hát.</small>
                     </span>
                   </button>
                 </div>
@@ -601,10 +601,27 @@ export function KaraokePage() {
   const profileById = new Map(room.members.map(member => [member.id, member]));
   const secondSingerProfile = (id: string | null) => id ? profileById.get(id) : undefined;
   const secondSingerName = (id: string | null) => id ? nameById.get(id) : undefined;
-  const performerNames = (song: SessionSong) => song.singer_2_id
-    ? `${nameById.get(song.singer_1_id)} + ${nameById.get(song.singer_2_id)}`
-    : `${nameById.get(song.singer_1_id)} · Solo`;
   const isRandomRoom = room.session.selection_mode === 'RANDOM';
+  const playlistOwnerNames = (song: SessionSong) => song.eligible_singer_ids
+    .map(id => nameById.get(id))
+    .filter((name): name is string => Boolean(name));
+  const performerNames = (song: SessionSong) => {
+    if (!song.singer_1_id) return 'Không phân công người hát';
+    return song.singer_2_id
+      ? `${nameById.get(song.singer_1_id)} + ${nameById.get(song.singer_2_id)}`
+      : `${nameById.get(song.singer_1_id)} · Solo`;
+  };
+  const playlistSourceButton = (song: SessionSong, compact = false) => (
+    <button
+      type="button"
+      className={`playlist-source-button ${compact ? 'is-compact' : ''}`}
+      onClick={() => setInspectionSong(song)}
+      title="Xem bài này có trong playlist của ai"
+    >
+      <Users size={compact ? 12 : 14} />
+      <span>Có trong {song.eligible_singer_ids.length} playlist</span>
+    </button>
+  );
 
   const queued = room.songs
     .filter(song => song.state === 'QUEUED')
@@ -706,13 +723,13 @@ export function KaraokePage() {
                 <span>Bài mới</span>
               </div>
               <div>
-                <strong>{Object.keys(stats.pairCounts).length}</strong>
-                <span>{isRandomRoom ? 'Cặp / solo' : 'Cặp đã hát'}</span>
+                <strong>{isRandomRoom ? room.members.length : Object.keys(stats.pairCounts).length}</strong>
+                <span>{isRandomRoom ? 'Playlist nguồn' : 'Cặp đã hát'}</span>
               </div>
             </div>
 
-            {/* Fairness Turn Balance Strip */}
-            <div style={{ marginBottom: '14px' }}>
+            {/* Fairness is relevant only when the smart engine assigns singers. */}
+            {!isRandomRoom && <div style={{ marginBottom: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                 <span className="eyebrow" style={{ fontSize: '0.68rem' }}>
                   CÂN BẰNG LƯỢT HÁT ({room.members.length} BẠN)
@@ -731,7 +748,7 @@ export function KaraokePage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
 
       {/* =========================================================
@@ -753,10 +770,11 @@ export function KaraokePage() {
           </div>
 
           <h2 className="spotlight-title">{spotlightSong.song?.title}</h2>
+          {isRandomRoom && playlistSourceButton(spotlightSong)}
           <p className="spotlight-artist">{spotlightSong.song?.artist || 'Chưa rõ nghệ sĩ'}</p>
 
-          {/* Duet Singers Showcase */}
-          <div
+          {/* Smart mode assigns singers; random mode only exposes playlist ownership. */}
+          {!isRandomRoom && <div
             style={{
               background: 'rgba(0, 0, 0, 0.25)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -770,9 +788,9 @@ export function KaraokePage() {
             </div>
 
             <SingerPair
-              singer1={profileById.get(spotlightSong.singer_1_id)}
+              singer1={spotlightSong.singer_1_id ? profileById.get(spotlightSong.singer_1_id) : undefined}
               singer2={secondSingerProfile(spotlightSong.singer_2_id)}
-              singer1Name={nameById.get(spotlightSong.singer_1_id)}
+              singer1Name={spotlightSong.singer_1_id ? nameById.get(spotlightSong.singer_1_id) : undefined}
               singer2Name={secondSingerName(spotlightSong.singer_2_id)}
               isSpotlight={true}
             />
@@ -781,7 +799,7 @@ export function KaraokePage() {
               Biết bởi {spotlightSong.eligible_singer_ids.length}/{room.members.length} thành viên: {' '}
               {spotlightSong.eligible_singer_ids.map(id => nameById.get(id)).filter(Boolean).join(', ')}
             </p>
-          </div>
+          </div>}
 
           {/* Primary Spotlight Action: Done / Played */}
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -864,7 +882,7 @@ export function KaraokePage() {
             {subsequentQueue.map((song, index) => {
               const queuePosition = index + 2;
               return (
-                <article className="queue-track-item" key={song.id}>
+                <article className={`queue-track-item ${isRandomRoom ? 'is-random' : ''}`} key={song.id}>
                   {/* Queue Number */}
                   <span className="queue-number" style={{ width: '24px', textAlign: 'center' }}>
                     {String(queuePosition).padStart(2, '0')}
@@ -884,21 +902,22 @@ export function KaraokePage() {
                     >
                       {song.song?.title}
                     </h3>
+                    {isRandomRoom && playlistSourceButton(song, true)}
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                       {song.song?.artist || 'Chưa rõ nghệ sĩ'}
                     </p>
                   </div>
 
-                  {/* Singer Pair */}
-                  <div style={{ flexShrink: 0 }}>
+                  {/* Singer assignment exists only in smart mode. */}
+                  {!isRandomRoom && <div style={{ flexShrink: 0 }}>
                     <SingerPair
-                      singer1={profileById.get(song.singer_1_id)}
+                      singer1={song.singer_1_id ? profileById.get(song.singer_1_id) : undefined}
                       singer2={secondSingerProfile(song.singer_2_id)}
-                      singer1Name={nameById.get(song.singer_1_id)}
+                      singer1Name={song.singer_1_id ? nameById.get(song.singer_1_id) : undefined}
                       singer2Name={secondSingerName(song.singer_2_id)}
                       size="sm"
                     />
-                  </div>
+                  </div>}
 
                   {/* Actions for Queue Item */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1043,7 +1062,9 @@ export function KaraokePage() {
                       {song.song?.title}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {performerNames(song)}
+                      {isRandomRoom
+                        ? playlistOwnerNames(song).join(', ')
+                        : performerNames(song)}
                       {song.played_at && (
                         <span>
                           {' · '}
@@ -1099,8 +1120,8 @@ export function KaraokePage() {
                 <span>Bài mới</span>
               </div>
               <div>
-                <strong>{Object.keys(stats.pairCounts).length}</strong>
-                <span>{isRandomRoom ? 'Cặp / solo' : 'Cặp đã hát'}</span>
+                <strong>{isRandomRoom ? room.members.length : Object.keys(stats.pairCounts).length}</strong>
+                <span>{isRandomRoom ? 'Playlist nguồn' : 'Cặp đã hát'}</span>
               </div>
             </div>
           </div>
@@ -1108,7 +1129,7 @@ export function KaraokePage() {
           {/* Section 2: Current & Next Singers indicator */}
           <div className="session-context-section">
             <span className="eyebrow" style={{ marginBottom: '10px' }}>
-              <Mic size={12} /> CA SĨ ĐANG & TIẾP THEO
+              <Mic size={12} /> {isRandomRoom ? 'BÀI ĐANG & TIẾP THEO' : 'CA SĨ ĐANG & TIẾP THEO'}
             </span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {spotlightSong && (
@@ -1119,13 +1140,15 @@ export function KaraokePage() {
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {spotlightSong.song?.title}
                   </div>
-                  <SingerPair
-                    singer1={profileById.get(spotlightSong.singer_1_id)}
-                    singer2={secondSingerProfile(spotlightSong.singer_2_id)}
-                    singer1Name={nameById.get(spotlightSong.singer_1_id)}
-                    singer2Name={secondSingerName(spotlightSong.singer_2_id)}
-                    size="sm"
-                  />
+                  {isRandomRoom
+                    ? playlistSourceButton(spotlightSong, true)
+                    : <SingerPair
+                        singer1={spotlightSong.singer_1_id ? profileById.get(spotlightSong.singer_1_id) : undefined}
+                        singer2={secondSingerProfile(spotlightSong.singer_2_id)}
+                        singer1Name={spotlightSong.singer_1_id ? nameById.get(spotlightSong.singer_1_id) : undefined}
+                        singer2Name={secondSingerName(spotlightSong.singer_2_id)}
+                        size="sm"
+                      />}
                 </div>
               )}
 
@@ -1137,13 +1160,15 @@ export function KaraokePage() {
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {subsequentQueue[0].song?.title}
                   </div>
-                  <SingerPair
-                    singer1={profileById.get(subsequentQueue[0].singer_1_id)}
-                    singer2={secondSingerProfile(subsequentQueue[0].singer_2_id)}
-                    singer1Name={nameById.get(subsequentQueue[0].singer_1_id)}
-                    singer2Name={secondSingerName(subsequentQueue[0].singer_2_id)}
-                    size="sm"
-                  />
+                  {isRandomRoom
+                    ? playlistSourceButton(subsequentQueue[0], true)
+                    : <SingerPair
+                        singer1={subsequentQueue[0].singer_1_id ? profileById.get(subsequentQueue[0].singer_1_id) : undefined}
+                        singer2={secondSingerProfile(subsequentQueue[0].singer_2_id)}
+                        singer1Name={subsequentQueue[0].singer_1_id ? nameById.get(subsequentQueue[0].singer_1_id) : undefined}
+                        singer2Name={secondSingerName(subsequentQueue[0].singer_2_id)}
+                        size="sm"
+                      />}
                 </div>
               ) : (
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Chưa có bài tiếp theo trong hàng chờ.</p>
@@ -1151,11 +1176,11 @@ export function KaraokePage() {
             </div>
           </div>
 
-          {/* Section 3: Participant Turns Breakdown */}
+          {/* Section 3: Participant context */}
           <div className="session-context-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <span className="eyebrow">
-                <Users size={12} /> CÂN BẰNG LƯỢT HÁT
+                <Users size={12} /> {isRandomRoom ? 'PLAYLIST ĐÃ CHỌN' : 'CÂN BẰNG LƯỢT HÁT'}
               </span>
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                 {room.members.length} người
@@ -1173,11 +1198,11 @@ export function KaraokePage() {
                     <span style={{ fontSize: '0.8rem', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {member.display_name}
                     </span>
-                    <div style={{ width: '60px', height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+                    {!isRandomRoom && <div style={{ width: '60px', height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
                       <div style={{ width: `${pct}%`, height: '100%', background: 'var(--grad-primary)', borderRadius: '3px' }} />
-                    </div>
+                    </div>}
                     <strong style={{ fontSize: '0.8rem', color: 'var(--neon-cyan)', width: '42px', textAlign: 'right' }}>
-                      {count} lượt
+                      {isRandomRoom ? 'Nguồn' : `${count} lượt`}
                     </strong>
                   </div>
                 );
@@ -1270,23 +1295,26 @@ export function KaraokePage() {
             style={{ maxWidth: '420px' }}
           >
             <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-display)', marginBottom: '8px' }}>
-              Thông tin đề xuất bài hát
+              {isRandomRoom ? 'Bài này có trong playlist của ai?' : 'Thông tin đề xuất bài hát'}
             </h3>
             <p style={{ fontWeight: 700, color: 'var(--neon-cyan)', marginBottom: '14px' }}>
               {inspectionSong.song?.title}
             </p>
 
             <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div>
+              {!isRandomRoom && <div>
                 <strong>{inspectionSong.singer_2_id ? 'Cặp song ca:' : 'Ca sĩ solo:'}</strong> {performerNames(inspectionSong)}
-              </div>
+              </div>}
               <div>
-                <strong>Người cùng biết hát:</strong>{' '}
-                {inspectionSong.eligible_singer_ids.map(id => nameById.get(id)).join(', ')}
+                <strong>{isRandomRoom ? 'Có trong playlist của:' : 'Người cùng biết hát:'}</strong>{' '}
+                {playlistOwnerNames(inspectionSong).join(', ')}
               </div>
-              <div>
+              {!isRandomRoom && <div>
                 <strong>Điểm cân bằng:</strong> {Math.round(inspectionSong.score)}
-              </div>
+              </div>}
+              {isRandomRoom && <div>
+                Chế độ ngẫu nhiên chỉ chọn bài hát, không phân công ai hát hoặc hát cùng ai.
+              </div>}
             </div>
 
             <button

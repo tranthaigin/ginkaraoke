@@ -175,8 +175,14 @@ describe('unscored random playlist mode', () => {
       random: () => 0,
     });
     expect(result).toHaveLength(1);
-    expect(result[0].singerIds).toEqual(['A', null]);
+    expect(result[0].singerIds).toEqual([null, null]);
     expect(result[0].eligibleSingerIds).toEqual(['A']);
+  });
+
+  it('never assigns singers because random mode only chooses songs', () => {
+    const result = generateRandomPlaylist({ ...base, limit: 20, random: () => 0.75 });
+    expect(result.every(item => item.singerIds[0] === null && item.singerIds[1] === null)).toBe(true);
+    expect(result.every(item => item.eligibleSingerIds.length > 0)).toBe(true);
   });
 
   it('does not use priority, favorite, compatibility, or fairness scores', () => {

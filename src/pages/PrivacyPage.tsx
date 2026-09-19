@@ -146,7 +146,8 @@ export function PrivacyPage() {
           <p>
             Các thành viên trong cùng nhóm có thể xem tên, ảnh đại diện, các bài hát liên quan đến
             hoạt động chung, danh sách người tham dự, hàng đợi và lịch sử phiên karaoke. Điều này cần
-            thiết để tìm hoặc bốc bài và phân công người hát. Người không thuộc nhóm không được cấp quyền
+            thiết để tìm bài, bốc bài và, trong chế độ thông minh, phân công người hát. Chế độ ngẫu nhiên
+            chỉ lưu bài được chọn cùng những playlist có chứa bài đó, không phân công người hát. Người không thuộc nhóm không được cấp quyền
             đọc dữ liệu nhóm qua chính sách truy cập của cơ sở dữ liệu.
           </p>
           <p>
