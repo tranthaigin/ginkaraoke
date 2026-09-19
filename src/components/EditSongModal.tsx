@@ -1,68 +1,84 @@
-import React, { useState } from 'react';
-import { MemberSong, Priority } from '../types';
-import { MemberSongRepo } from '../repositories';
+import { useState } from 'react';
+import { Check, Flame, Music, Star, Trash2, X } from 'lucide-react';
+import type { MemberSong, Priority } from '../types';
+import { MemberSongRepo, SongRepo } from '../repositories';
 import { useApp } from '../context/AppContext';
-import { X, Star, Flame, Music, Trash2, Check } from 'lucide-react';
 
-interface EditSongModalProps {
+interface Props {
   memberSong: MemberSong | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export const EditSongModal: React.FC<EditSongModalProps> = ({ memberSong, onClose, onSuccess }) => {
-  const { showToast } = useApp();
-
-  const [priority, setPriority] = useState<Priority>(memberSong?.priority || 'NORMAL');
-  const [favorite, setFavorite] = useState<boolean>(memberSong?.favorite || false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+export function EditSongModal({ memberSong, onClose, onSuccess }: Props) {
+  const { showToast, isOnline } = useApp();
+  const [title, setTitle] = useState(memberSong?.song?.title ?? '');
+  const [artist, setArtist] = useState(memberSong?.song?.artist ?? '');
+  const [priority, setPriority] = useState<Priority>(memberSong?.priority ?? 'NORMAL');
+  const [favorite, setFavorite] = useState(memberSong?.favorite ?? false);
+  const [busy, setBusy] = useState(false);
 
   if (!memberSong) return null;
 
-  const handleSave = async () => {
-    setIsSubmitting(true);
+  const save = async () => {
+    if (!isOnline) {
+      showToast('Bạn đang offline. Thay đổi chưa được lưu.', 'warning');
+      return;
+    }
+    setBusy(true);
     try {
-      await MemberSongRepo.updateMemberSong(memberSong.id, {
-        priority,
-        favorite,
-      });
-      showToast('Đã cập nhật bài hát!', 'success');
+      const song = await SongRepo.findOrCreate(title, artist);
+      if (song.id === memberSong.song_id) {
+        await MemberSongRepo.update(memberSong.id, { priority, favorite });
+      } else {
+        await MemberSongRepo.add(song.id, favorite, priority);
+        await MemberSongRepo.remove(memberSong.id);
+      }
+      showToast('Đã cập nhật bài hát! ✨', 'success');
       onSuccess();
       onClose();
-    } catch (err: any) {
-      showToast(err.message || 'Lỗi cập nhật bài hát', 'error');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Không thể cập nhật bài hát.', 'error');
     } finally {
-      setIsSubmitting(false);
+      setBusy(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm(`Bạn có chắc muốn xóa "${memberSong.song?.title}" khỏi playlist cá nhân?`)) {
-      return;
-    }
-    setIsSubmitting(true);
+  const remove = async () => {
+    if (!window.confirm(`Xóa “${memberSong.song?.title}” khỏi playlist của bạn?`)) return;
+    setBusy(true);
     try {
-      await MemberSongRepo.removeMemberSong(memberSong.id);
-      showToast(`Đã xóa bài "${memberSong.song?.title}"!`, 'info');
+      await MemberSongRepo.remove(memberSong.id);
+      showToast('Đã xóa bài hát khỏi playlist.', 'success');
       onSuccess();
       onClose();
-    } catch (err: any) {
-      showToast(err.message || 'Lỗi xóa bài hát', 'error');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Không thể xóa bài hát.', 'error');
     } finally {
-      setIsSubmitting(false);
+      setBusy(false);
     }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        {/* Header */}
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-song-title"
+        onClick={event => event.stopPropagation()}
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div>
-            <h3 style={{ fontSize: '1.1rem' }}>{memberSong.song?.title}</h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{memberSong.song?.artist || 'Không rõ ca sĩ'}</p>
+            <h3 id="edit-song-title" style={{ fontSize: '1.2rem', fontFamily: 'var(--font-display)' }}>
+              Chỉnh sửa bài hát
+            </h3>
+            <p className="muted" style={{ fontSize: '0.78rem', marginTop: '2px' }}>
+              Thay đổi tên bài sẽ cập nhật hoặc liên kết đúng bản ghi chuẩn hóa.
+            </p>
           </div>
           <button
+            aria-label="Đóng"
             onClick={onClose}
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
@@ -81,83 +97,68 @@ export const EditSongModal: React.FC<EditSongModalProps> = ({ memberSong, onClos
           </button>
         </div>
 
-        {/* Priority Selection */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-            MỨC ĐỘ ƯU TIÊN
+        <div style={{ marginBottom: '14px' }}>
+          <label className="field-label" style={{ marginTop: 0 }}>
+            Tên bài hát *
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+          <input
+            className="input-text"
+            value={title}
+            maxLength={200}
+            required
+            onChange={event => setTitle(event.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="field-label" style={{ marginTop: 0 }}>
+            Nghệ sĩ / Ca sĩ
+          </label>
+          <input
+            className="input-text"
+            value={artist}
+            maxLength={200}
+            onChange={event => setArtist(event.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="field-label" style={{ marginTop: 0 }}>
+            Mức độ ưu tiên
+          </label>
+          <div className="priority-grid">
             <button
               type="button"
+              className={priority === 'NORMAL' ? 'active' : ''}
               onClick={() => setPriority('NORMAL')}
-              style={{
-                padding: '10px 6px',
-                borderRadius: 'var(--radius-md)',
-                background: priority === 'NORMAL' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                border: priority === 'NORMAL' ? '1px solid #94a3b8' : '1px solid var(--border-subtle)',
-                color: priority === 'NORMAL' ? '#ffffff' : 'var(--text-muted)',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
             >
               Biết hát
             </button>
-
             <button
               type="button"
+              className={`cyan ${priority === 'WANT_TO_SING' ? 'active' : ''}`}
               onClick={() => setPriority('WANT_TO_SING')}
-              style={{
-                padding: '10px 6px',
-                borderRadius: 'var(--radius-md)',
-                background: priority === 'WANT_TO_SING' ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                border: priority === 'WANT_TO_SING' ? '1px solid var(--neon-cyan)' : '1px solid var(--border-subtle)',
-                color: priority === 'WANT_TO_SING' ? 'var(--neon-cyan)' : 'var(--text-muted)',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px',
-              }}
             >
-              <Music size={13} />
-              Muốn hát
+              <Music size={14} /> Muốn hát
             </button>
-
             <button
               type="button"
+              className={`rose ${priority === 'HIGH' ? 'active' : ''}`}
               onClick={() => setPriority('HIGH')}
-              style={{
-                padding: '10px 6px',
-                borderRadius: 'var(--radius-md)',
-                background: priority === 'HIGH' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                border: priority === 'HIGH' ? '1px solid var(--neon-rose)' : '1px solid var(--border-subtle)',
-                color: priority === 'HIGH' ? '#fb7185' : 'var(--text-muted)',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '4px',
-              }}
             >
-              <Flame size={13} />
-              Bài tủ 🔥
+              <Flame size={14} /> Bài tủ 🔥
             </button>
           </div>
         </div>
 
-        {/* Favorite Toggle */}
-        <div style={{ marginBottom: '20px' }}>
+        {/* Favorite Button */}
+        <div style={{ marginBottom: '22px' }}>
           <button
             type="button"
-            onClick={() => setFavorite(v => !v)}
+            onClick={() => setFavorite(value => !value)}
             style={{
               width: '100%',
-              padding: '10px 14px',
+              padding: '11px 16px',
               borderRadius: 'var(--radius-md)',
               background: favorite ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.04)',
               border: favorite ? '1px solid var(--neon-amber)' : '1px solid var(--border-subtle)',
@@ -169,51 +170,41 @@ export const EditSongModal: React.FC<EditSongModalProps> = ({ memberSong, onClos
               justifyContent: 'center',
               gap: '8px',
               cursor: 'pointer',
+              transition: 'all 0.2s ease',
             }}
           >
-            <Star size={16} fill={favorite ? '#fbbf24' : 'none'} />
+            <Star size={17} fill={favorite ? '#fbbf24' : 'none'} />
             <span>{favorite ? 'Đã yêu thích ⭐' : 'Đánh dấu yêu thích ⭐'}</span>
           </button>
         </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: '10px' }}>
           <button
             type="button"
-            onClick={handleDelete}
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => void remove()}
             style={{
-              flex: '1',
-              padding: '12px',
-              borderRadius: 'var(--radius-full)',
-              background: 'rgba(244, 63, 94, 0.12)',
-              border: '1px solid rgba(244, 63, 94, 0.3)',
               color: '#fb7185',
-              fontWeight: 600,
-              fontSize: '0.88rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
+              borderColor: 'rgba(244, 63, 94, 0.35)',
+              background: 'rgba(244, 63, 94, 0.08)',
             }}
-            disabled={isSubmitting}
           >
             <Trash2 size={16} />
-            <span>Xóa bài</span>
+            <span>Xóa</span>
           </button>
 
           <button
             type="button"
             className="btn-primary"
-            onClick={handleSave}
-            style={{ flex: '2' }}
-            disabled={isSubmitting}
+            disabled={busy || !title.trim()}
+            onClick={() => void save()}
           >
             <Check size={18} />
-            <span>Lưu thay đổi</span>
+            <span>{busy ? 'Đang lưu…' : 'Lưu thay đổi'}</span>
           </button>
         </div>
       </div>
     </div>
   );
-};
+}

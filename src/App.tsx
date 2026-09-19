@@ -1,6 +1,6 @@
-import React from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AppProvider } from './context/AppContext';
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AppProvider, useApp } from './context/AppContext';
+import { AuthGate } from './components/AuthGate';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { ToastContainer } from './components/ToastContainer';
@@ -10,28 +10,34 @@ import { KaraokePage } from './pages/KaraokePage';
 import { HistoryPage } from './pages/HistoryPage';
 import { GroupPage } from './pages/GroupPage';
 
-export const App: React.FC = () => {
+function ProtectedApp() {
+  const { authStatus, profile, currentGroup } = useApp();
+  if (authStatus !== 'ready' || !profile?.onboarding_completed || !currentGroup) return <AuthGate />;
+  return (
+    <div className="app-container">
+      <Navbar />
+      <main className="app-main">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/my-songs" element={<MySongsPage />} />
+          <Route path="/karaoke" element={<KaraokePage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/group" element={<GroupPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+      <BottomNav />
+      <ToastContainer />
+    </div>
+  );
+}
+
+export default function App() {
   return (
     <AppProvider>
       <HashRouter>
-        <div className="app-container">
-          <Navbar />
-          <main style={{ flex: 1 }}>
-            <Routes>
-              <Route path="/" element={<HomePage />} />
-              <Route path="/my-songs" element={<MySongsPage />} />
-              <Route path="/karaoke" element={<KaraokePage />} />
-              <Route path="/history" element={<HistoryPage />} />
-              <Route path="/group" element={<GroupPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </main>
-          <BottomNav />
-          <ToastContainer />
-        </div>
+        <ProtectedApp />
       </HashRouter>
     </AppProvider>
   );
-};
-
-export default App;
+}

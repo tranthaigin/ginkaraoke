@@ -1,280 +1,439 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Calendar, Check, ChevronRight, Copy, Flame, History, Mic, Music, Plus, Sparkles, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MemberSongRepo, SessionRepo } from '../repositories';
-import { KaraokeSession, Song } from '../types';
+import type { KaraokeSession, Song } from '../types';
 import { AddSongModal } from '../components/AddSongModal';
-import { Plus, Mic, Users, Music, Flame, Sparkles, ChevronRight } from 'lucide-react';
+import { MemberAvatar } from '../components/MemberAvatar';
+import { EqualizerIcon } from '../components/EqualizerIcon';
 
-export const HomePage: React.FC = () => {
+export function HomePage() {
   const navigate = useNavigate();
-  const { currentGroup, currentMember, members } = useApp();
+  const { profile, currentGroup, members, showToast } = useApp();
+  const [myCount, setMyCount] = useState(0);
+  const [recentSessions, setRecentSessions] = useState<KaraokeSession[]>([]);
+  const [popular, setPopular] = useState<{ song: Song; count: number }[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
-  const [mySongsCount, setMySongsCount] = useState<number>(0);
-  const [lastSession, setLastSession] = useState<KaraokeSession | null>(null);
-  const [trendingSongs, setTrendingSongs] = useState<{ song: Song; count: number; memberNames: string[] }[]>([]);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-
-  const loadHomeData = async () => {
+  const load = useCallback(async () => {
     if (!currentGroup) return;
     setLoading(true);
     try {
-      // 1. My songs count
-      if (currentMember) {
-        const mySongs = await MemberSongRepo.getMemberSongs(currentMember.id);
-        setMySongsCount(mySongs.length);
-      }
+      const [mine, groupSongs, sessions] = await Promise.all([
+        MemberSongRepo.getMine(),
+        MemberSongRepo.getForGroup(currentGroup.id),
+        SessionRepo.list(currentGroup.id),
+      ]);
+      setMyCount(mine.length);
+      setRecentSessions(sessions.slice(0, 3));
 
-      // 2. Last session
-      const sessions = await SessionRepo.getSessionsByGroup(currentGroup.id);
-      if (sessions.length > 0) {
-        setLastSession(sessions[0]);
-      } else {
-        setLastSession(null);
-      }
+      // Aggregate songs known by multiple group members
+      const map = new Map<string, { song: Song; users: Set<string> }>();
+      groupSongs.forEach(item => {
+        if (!item.song) return;
+        const value = map.get(item.song_id) ?? { song: item.song, users: new Set<string>() };
+        value.users.add(item.user_id);
+        map.set(item.song_id, value);
+      });
 
-      // 3. Trending songs in group (most popular across all members)
-      const allGroupMemberSongs = await MemberSongRepo.getAllMemberSongsForGroup(currentGroup.id);
-      const songMap = new Map<string, { song: Song; members: Set<string> }>();
-
-      for (const ms of allGroupMemberSongs) {
-        if (!ms.song) continue;
-        const entry = songMap.get(ms.song_id) || { song: ms.song, members: new Set() };
-        const member = members.find(m => m.id === ms.member_id);
-        if (member) entry.members.add(member.display_name);
-        songMap.set(ms.song_id, entry);
-      }
-
-      const sortedTrending = Array.from(songMap.values())
-        .map(item => ({
-          song: item.song,
-          count: item.members.size,
-          memberNames: Array.from(item.members),
-        }))
-        .filter(item => item.count >= 1)
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 6);
-
-      setTrendingSongs(sortedTrending);
-    } catch (err) {
-      console.error('Lỗi tải dữ liệu Home:', err);
+      setPopular(
+        [...map.values()]
+          .map(value => ({ song: value.song, count: value.users.size }))
+          .sort((a, b) => b.count - a.count || a.song.title.localeCompare(b.song.title))
+          .slice(0, 12)
+      );
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Không thể tải trang chủ.', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentGroup, showToast]);
 
   useEffect(() => {
-    loadHomeData();
-  }, [currentGroup?.id, currentMember?.id, members.length]);
+    void load();
+  }, [load]);
+
+  const copyCode = async () => {
+    if (!currentGroup) return;
+    try {
+      await navigator.clipboard.writeText(currentGroup.join_code);
+      setCopied(true);
+      showToast('Đã sao chép mã nhóm! 📋', 'success');
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast('Không thể sao chép mã.', 'error');
+    }
+  };
+
+  const lastSession = recentSessions[0] ?? null;
 
   return (
     <div className="page-container">
-      {/* Header Greeting */}
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-              Chào mừng bạn đến với
-            </span>
-            <h1 style={{ fontSize: '1.65rem', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>Xin chào, {currentMember ? currentMember.display_name : 'Bạn'}</span>
-              <span style={{ fontSize: '1.4rem' }}>{currentMember?.avatar || '🎤'}</span>
-            </h1>
+      {/* Top Bar: Personal Greeting + Integrated Context */}
+      <section className="home-top-bar">
+        <div>
+          <span className="eyebrow">
+            <Sparkles size={12} /> SẴN SÀNG LÊN MIC?
+          </span>
+          <h1 className="home-greeting-lead">
+            Chào {profile?.display_name?.split(' ')[0]} 👋
+          </h1>
+          <p className="muted" style={{ marginTop: '2px' }}>
+            Hôm nay quẩy cùng <strong>{currentGroup?.name}</strong> · {members.length} thành viên · {loading ? '…' : myCount} bài trong playlist của bạn
+          </p>
+        </div>
+
+        {/* Desktop Social Group Capsule (>=1024px) */}
+        <div className="home-social-badge">
+          {/* Overlapping member avatars */}
+          <div style={{ display: 'flex', marginLeft: '2px' }}>
+            {members.slice(0, 4).map((m, i) => (
+              <div key={m.user_id} style={{ marginLeft: i === 0 ? 0 : -8, zIndex: 10 - i }}>
+                <MemberAvatar profile={m.profile} size="xs" />
+              </div>
+            ))}
           </div>
+
           <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="btn-primary"
-            style={{ padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: '0.85rem' }}
+            onClick={() => void copyCode()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: 'rgba(255, 255, 255, 0.07)',
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              fontFamily: 'monospace, var(--font-display)',
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              color: 'var(--neon-cyan)',
+              border: '1px solid var(--border-subtle)',
+              cursor: 'pointer',
+            }}
+            title="Nhấn để sao chép mã mời bạn bè"
           >
-            <Plus size={16} />
-            <span>Thêm bài</span>
+            <span>Mã: {currentGroup?.join_code}</span>
+            {copied ? <Check size={12} color="var(--emerald-400)" /> : <Copy size={11} />}
+          </button>
+
+          <button
+            onClick={() => navigate('/group')}
+            className="text-link"
+            style={{ fontSize: '0.78rem' }}
+          >
+            Hội bạn ({members.length})
           </button>
         </div>
-      </div>
 
-      {/* Quick Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '20px' }}>
-        {/* Stat 1: My Songs */}
-        <div
-          className="glass-card-interactive"
-          onClick={() => navigate('/my-songs')}
-          style={{ textAlign: 'center', padding: '12px 6px' }}
-        >
-          <div style={{ color: 'var(--neon-cyan)', marginBottom: '4px' }}>
-            <Music size={20} style={{ margin: '0 auto' }} />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff' }}>{mySongsCount}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Bài của tôi</div>
+        {/* Mobile profile avatar fallback */}
+        <div className="mobile-only-block">
+          <MemberAvatar profile={profile} size="md" />
         </div>
+      </section>
 
-        {/* Stat 2: Members */}
-        <div
-          className="glass-card-interactive"
-          onClick={() => navigate('/group')}
-          style={{ textAlign: 'center', padding: '12px 6px' }}
-        >
-          <div style={{ color: 'var(--neon-purple)', marginBottom: '4px' }}>
-            <Users size={20} style={{ margin: '0 auto' }} />
-          </div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff' }}>{members.length}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Thành viên</div>
-        </div>
-
-        {/* Stat 3: Last Outing */}
-        <div
-          className="glass-card-interactive"
-          onClick={() => navigate('/history')}
-          style={{ textAlign: 'center', padding: '12px 6px' }}
-        >
-          <div style={{ color: 'var(--neon-amber)', marginBottom: '4px' }}>
-            <Sparkles size={20} style={{ margin: '0 auto' }} />
-          </div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#ffffff', marginTop: '6px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {lastSession ? new Date(lastSession.created_at || '').toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '--/--'}
-          </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Buổi gần nhất</div>
-        </div>
-      </div>
-
-      {/* Main Karaoke Outing Banner */}
-      <div
-        className="glass-card"
-        style={{
-          background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
-          border: '1px solid var(--border-glow)',
-          padding: '20px',
-          borderRadius: 'var(--radius-lg)',
-          marginBottom: '24px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-          boxShadow: 'var(--shadow-glow)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '1.8rem' }}>🎉</span>
-          <div>
-            <h2 style={{ fontSize: '1.25rem', lineHeight: 1.2 }}>Hôm nay đi Karaoke?</h2>
-            <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-              Chọn ai đi hôm nay, GinKaraoke sẽ tự tìm bài hát chung và đề xuất playlist tối ưu!
-            </p>
-          </div>
-        </div>
+      {/* Mobile-Only Stat Grid (<1024px, completely hidden on Desktop) */}
+      <div className="stat-grid mobile-only-block" style={{ marginBottom: '16px' }}>
         <button
-          className="btn-primary"
-          onClick={() => navigate('/karaoke')}
-          style={{ width: '100%', fontSize: '1rem', padding: '14px' }}
+          className="stat-card"
+          onClick={() => navigate('/my-songs')}
+          title="Xem playlist cá nhân"
         >
-          <Mic size={20} />
-          <span>Bắt đầu chọn người đi hát</span>
+          <Music size={20} color="var(--neon-cyan)" />
+          <strong>{loading ? '…' : myCount}</strong>
+          <span>Bài của tôi</span>
+        </button>
+
+        <button
+          className="stat-card"
+          onClick={() => navigate('/group')}
+          title="Xem thành viên nhóm"
+        >
+          <Users size={20} color="var(--neon-purple)" />
+          <strong>{members.length}</strong>
+          <span>Thành viên</span>
+        </button>
+
+        <button
+          className="stat-card"
+          onClick={() => navigate('/history')}
+          title="Xem lịch sử hát"
+        >
+          <Flame size={20} color="var(--neon-rose)" />
+          <strong>
+            {lastSession
+              ? new Date(lastSession.created_at).toLocaleDateString('vi-VN', {
+                  day: '2-digit',
+                  month: '2-digit',
+                })
+              : '—'}
+          </strong>
+          <span>Gần nhất</span>
         </button>
       </div>
 
-      {/* Section: "Những bài nhóm có nhiều người cùng hát" */}
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Flame size={18} color="var(--neon-rose)" />
-            <h2 style={{ fontSize: '1.05rem', fontWeight: 700 }}>Bài nhóm nhiều người cùng biết</h2>
+      {/* PRIMARY: Hero Karaoke Stage (One Clear, High-Impact Music CTA) */}
+      <section className="home-hero-stage">
+        <div style={{ maxWidth: '620px', zIndex: 1 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <EqualizerIcon size="sm" animated={true} />
+            <span className="eyebrow" style={{ color: 'var(--neon-cyan)' }}>
+              PHÒNG KARAOKE THÔNG MINH
+            </span>
           </div>
-          <button
-            onClick={() => navigate('/karaoke')}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--neon-cyan)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <span>Tạo playlist</span>
-            <ChevronRight size={14} />
-          </button>
+
+          <h2 style={{ fontSize: '1.85rem', color: '#ffffff', margin: '4px 0 10px', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+            Lên mic cùng hội bạn ngay!
+          </h2>
+
+          <p style={{ color: 'rgba(255, 255, 255, 0.82)', fontSize: '0.94rem', lineHeight: 1.6 }}>
+            GinKaraoke tự động phân cặp song ca công bằng, ưu tiên bài tủ và sẵn sàng danh sách hát tức thì cho nhóm.
+          </p>
         </div>
 
-        {trendingSongs.length === 0 ? (
-          <div className="glass-card" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-            <p style={{ fontSize: '0.9rem' }}>Chưa có bài hát nào trong nhóm.</p>
+        <div style={{ zIndex: 1 }}>
+          <button
+            className="home-hero-btn"
+            onClick={() => navigate('/karaoke')}
+            title="Bắt đầu hoặc vào phòng hát karaoke"
+          >
+            <Mic size={22} color="#0284c7" />
+            <span>Vào phòng hát ngay</span>
+          </button>
+        </div>
+      </section>
+
+      {/* SECONDARY: Shared Songs Repertoire (Meaningful Desktop Music Grid) */}
+      <section style={{ marginBottom: '36px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Flame size={22} color="var(--neon-rose)" />
+            <h2 style={{ fontSize: '1.3rem' }}>Bài hát nhóm cùng biết hát</h2>
+            {popular.length > 0 && (
+              <span className="badge badge-purple" style={{ fontSize: '0.74rem' }}>
+                {popular.length} bài
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <button
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={() => setAdding(true)}
               className="btn-secondary"
-              style={{ marginTop: '10px', fontSize: '0.82rem' }}
+              style={{ padding: '7px 14px', fontSize: '0.82rem', minHeight: '34px' }}
             >
-              + Thêm bài đầu tiên
+              <Plus size={15} color="var(--neon-cyan)" />
+              <span>Thêm bài mới</span>
+            </button>
+
+            <button
+              onClick={() => navigate('/my-songs')}
+              className="text-link"
+              style={{ fontSize: '0.82rem' }}
+            >
+              <span>Playlist của tôi</span>
+              <ChevronRight size={14} />
             </button>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {trendingSongs.map((item, idx) => (
+        </div>
+
+        {popular.length > 0 ? (
+          <div className="shared-songs-music-grid">
+            {popular.map((item, index) => (
               <div
                 key={item.song.id}
-                className="glass-card"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 14px',
-                }}
+                className="shared-song-row"
+                onClick={() => navigate('/karaoke')}
+                title="Bấm để vào phòng hát bài này"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+                {/* Track Index */}
+                <span
+                  style={{
+                    fontFamily: 'var(--font-display)',
+                    fontSize: '0.92rem',
+                    fontWeight: 800,
+                    color:
+                      index === 0
+                        ? 'var(--neon-cyan)'
+                        : index === 1
+                        ? 'var(--violet-400)'
+                        : index === 2
+                        ? '#fbbf24'
+                        : 'var(--text-muted)',
+                    width: '26px',
+                    textAlign: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+
+                {/* Song Meta */}
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      width: '28px',
-                      height: '28px',
-                      borderRadius: '50%',
-                      background: idx === 0 ? 'var(--grad-sunset)' : 'rgba(255, 255, 255, 0.08)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '0.8rem',
-                      fontWeight: 800,
-                      color: '#ffffff',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {idx + 1}
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{
+                      fontFamily: 'var(--font-display)',
                       fontWeight: 700,
-                      fontSize: '0.92rem',
+                      fontSize: '0.94rem',
                       color: 'var(--text-primary)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
-                    }}>
-                      {item.song.title}
-                    </div>
-                    <div style={{
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {item.song.title}
+                  </div>
+                  <div
+                    style={{
                       fontSize: '0.78rem',
                       color: 'var(--text-muted)',
+                      marginTop: '2px',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis'
-                    }}>
-                      {item.song.artist || 'Không rõ ca sĩ'} • {item.memberNames.join(', ')}
-                    </div>
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {item.song.artist || 'Chưa rõ nghệ sĩ'}
                   </div>
                 </div>
 
-                <div className="badge badge-cyan" style={{ marginLeft: '8px', flexShrink: 0 }}>
+                {/* Overlap Context Badge */}
+                <span
+                  className="badge badge-cyan"
+                  style={{ flexShrink: 0, fontSize: '0.74rem' }}
+                  title={`${item.count} thành viên trong nhóm biết hát bài này`}
+                >
                   <Users size={12} />
-                  <span>{item.count}/{members.length}</span>
+                  <span>{item.count}/{members.length} bạn</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="shared-songs-empty-inline">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  background: 'rgba(0, 242, 254, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--neon-cyan)',
+                  flexShrink: 0,
+                }}
+              >
+                <Music size={20} />
+              </div>
+              <div>
+                <p style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                  Chưa có bài hát chung giữa các bạn
+                </p>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Thêm những bài hát bạn biết vào playlist cá nhân để GinKaraoke tự động tìm bài trùng cho nhóm!
+                </p>
+              </div>
+            </div>
+
+            <button
+              className="btn-primary"
+              onClick={() => setAdding(true)}
+              style={{ padding: '8px 18px', fontSize: '0.84rem', minHeight: '36px' }}
+            >
+              <Plus size={16} />
+              <span>Thêm bài ngay</span>
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* TERTIARY: Recent Karaoke Sessions Context */}
+      {recentSessions.length > 0 && (
+        <section style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <History size={18} color="var(--violet-400)" />
+              <h2 style={{ fontSize: '1.2rem' }}>Kỷ niệm buổi hát gần đây</h2>
+            </div>
+
+            <button
+              onClick={() => navigate('/history')}
+              className="text-link"
+              style={{ fontSize: '0.82rem' }}
+            >
+              <span>Xem toàn bộ lịch sử</span>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          <div className="recent-sessions-grid">
+            {recentSessions.map(sess => (
+              <div
+                key={sess.id}
+                className="recent-session-card"
+                onClick={() => navigate('/history')}
+                title="Bấm để xem lại chi tiết buổi hát"
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <span className="badge badge-purple" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
+                      <Calendar size={10} />
+                      <span>{new Date(sess.created_at).toLocaleDateString('vi-VN')}</span>
+                    </span>
+
+                    {sess.status === 'active' && (
+                      <span className="badge badge-emerald" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
+                        <Mic size={10} /> Đang diễn ra
+                      </span>
+                    )}
+                  </div>
+
+                  <h3
+                    style={{
+                      fontFamily: 'var(--font-display)',
+                      fontSize: '1.02rem',
+                      fontWeight: 700,
+                      color: 'var(--text-primary)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {sess.name}
+                  </h3>
+
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Bấm để xem lại các cặp song ca & bài đã diễn
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <ChevronRight size={16} />
                 </div>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </section>
+      )}
 
-      <AddSongModal
-        isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
-        onSuccess={loadHomeData}
-      />
+      {/* Add Song Modal */}
+      <AddSongModal isOpen={adding} onClose={() => setAdding(false)} onSuccess={load} />
     </div>
   );
-};
+}

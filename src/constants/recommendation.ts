@@ -1,19 +1,15 @@
-import { RecommendationConfig } from '../types';
+import type { RecommendationConfig } from '../types';
 
 export const DEFAULT_RECOMMENDATION_CONFIG: RecommendationConfig = {
-  // Member overlap is the primary signal (e.g. 10 points per matched attendee)
-  COMMON_MEMBER_WEIGHT: 10,
-
-  // Bonus for songs marked as favorite
-  FAVORITE_BONUS: 3,
-
-  // Bonuses for song priority
-  HIGH_PRIORITY_BONUS: 5,
-  WANT_TO_SING_BONUS: 2,
-
-  // Penalty if the song was sung in the most recent session(s)
-  RECENTLY_SUNG_PENALTY: 5,
-
-  // Small fairness nudge to balance variety when scores are close
-  FAIRNESS_BONUS: 2,
+  MAX_BATCH_SIZE: 50,
+  COMMON_MEMBER_WEIGHT: 100,
+  FAVORITE_BONUS: 8,
+  HIGH_PRIORITY_BONUS: 12,
+  WANT_TO_SING_BONUS: 5,
+  PAIR_DIVERSITY_BONUS: 18,
+  FAIRNESS_WEIGHT: 8,
+  REST_WEIGHT: 3,
+  REPEATED_PAIR_PENALTY: 14,
+  CONSECUTIVE_SINGER_PENALTY: 20,
+  RECENT_HISTORY_PENALTY: 4,
 };

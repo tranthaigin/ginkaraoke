@@ -1,221 +1,240 @@
-import {
+import { DEFAULT_RECOMMENDATION_CONFIG } from '../../constants/recommendation';
+import type {
   Member,
   MemberSong,
+  Priority,
+  QueueHistoryItem,
+  RecommendationConfig,
+  RecommendationScoreBreakdown,
+  SessionStats,
   Song,
   SongRecommendation,
-  RecommendationConfig,
-  Priority
 } from '../../types';
-import { DEFAULT_RECOMMENDATION_CONFIG } from '../../constants/recommendation';
 
 export interface GeneratePlaylistInput {
   selectedMemberIds: string[];
   members: Member[];
   memberSongs: MemberSong[];
   allSongs: Song[];
+  sessionHistory?: QueueHistoryItem[];
   recentlySungSongIds?: string[];
+  recycleMode?: boolean;
+  limit?: number;
   config?: Partial<RecommendationConfig>;
 }
 
-/**
- * Pure recommendation engine that generates a ranked collaborative karaoke playlist.
- * Follows the scoring formula:
- * score = (memberCount * COMMON_MEMBER_WEIGHT)
- *       + priorityScore
- *       + favoriteBonus
- *       + fairnessBonus
- *       - recentlySungPenalty
- */
-export function generateKaraokePlaylist(input: GeneratePlaylistInput): SongRecommendation[] {
-  const {
-    selectedMemberIds,
-    members,
-    memberSongs,
-    allSongs,
-    recentlySungSongIds = [],
-    config: customConfig
-  } = input;
+export interface Availability {
+  eligibleSongs: number;
+  unusedSongs: number;
+  exhausted: boolean;
+}
 
-  const cfg: RecommendationConfig = {
-    ...DEFAULT_RECOMMENDATION_CONFIG,
-    ...customConfig
-  };
+interface Candidate {
+  song: Song;
+  eligibleSingerIds: string[];
+  compatibility: number;
+  priority: number;
+  favorite: number;
+  recentHistoryPenalty: number;
+  topPriority: Priority;
+  hasFavorite: boolean;
+}
 
-  if (!selectedMemberIds || selectedMemberIds.length === 0) {
-    return [];
+interface EngineState {
+  turns: Map<string, number>;
+  pairs: Map<string, number>;
+  partners: Map<string, Set<string>>;
+  lastSeen: Map<string, number>;
+  previous: [string, string] | null;
+  position: number;
+}
+
+const pairKey = (a: string, b: string): string => [a, b].sort().join('|');
+
+function buildCandidates(input: GeneratePlaylistInput, cfg: RecommendationConfig): Candidate[] {
+  const selected = new Set(input.selectedMemberIds);
+  const songs = new Map(input.allSongs.map(song => [song.id, song]));
+  const bySong = new Map<string, MemberSong[]>();
+  for (const item of input.memberSongs) {
+    if (!selected.has(item.user_id)) continue;
+    const entries = bySong.get(item.song_id) ?? [];
+    if (!entries.some(entry => entry.user_id === item.user_id)) entries.push(item);
+    bySong.set(item.song_id, entries);
   }
 
-  const selectedSet = new Set(selectedMemberIds);
-  const memberMap = new Map<string, Member>(members.map(m => [m.id, m]));
-  const songMap = new Map<string, Song>(allSongs.map(s => [s.id, s]));
+  const recent = new Set(input.recentlySungSongIds ?? []);
+  const used = new Set((input.sessionHistory ?? []).map(item => item.songId));
+  const result: Candidate[] = [];
 
-  // Step 1: Filter memberSongs to ONLY include chosen attendees
-  const relevantMemberSongs = memberSongs.filter(ms => selectedSet.has(ms.member_id));
-
-  // Step 2: Group by song_id
-  const songToMemberEntries = new Map<string, MemberSong[]>();
-  for (const ms of relevantMemberSongs) {
-    const list = songToMemberEntries.get(ms.song_id) || [];
-    list.push(ms);
-    songToMemberEntries.set(ms.song_id, list);
-  }
-
-  const recentSet = new Set(recentlySungSongIds);
-  const totalParticipants = selectedMemberIds.length;
-
-  // Step 3: Compute base score and individual bonuses
-  interface CandidateItem {
-    song: Song;
-    memberIds: string[];
-    members: Member[];
-    matchCount: number;
-    baseScore: number;
-    priorityBonus: number;
-    favoriteBonus: number;
-    recencyPenalty: number;
-    rawScore: number;
-    topPriority: Priority;
-    hasFavorite: boolean;
-  }
-
-  const candidates: CandidateItem[] = [];
-
-  for (const [songId, entries] of songToMemberEntries.entries()) {
-    const song = songMap.get(songId);
-    if (!song) continue;
-
-    const matchedMemberIds = entries.map(e => e.member_id);
-    const matchedMembers = matchedMemberIds
-      .map(id => memberMap.get(id))
-      .filter((m): m is Member => !!m);
-
-    const matchCount = matchedMemberIds.length;
-    const baseScore = matchCount * cfg.COMMON_MEMBER_WEIGHT;
-
-    let priorityBonus = 0;
-    let favoriteBonus = 0;
-    let hasHigh = false;
-    let hasWant = false;
-    let hasFav = false;
-
-    for (const entry of entries) {
-      if (entry.priority === 'HIGH') {
-        priorityBonus += cfg.HIGH_PRIORITY_BONUS;
-        hasHigh = true;
-      } else if (entry.priority === 'WANT_TO_SING') {
-        priorityBonus += cfg.WANT_TO_SING_BONUS;
-        hasWant = true;
-      }
-
-      if (entry.favorite) {
-        favoriteBonus += cfg.FAVORITE_BONUS;
-        hasFav = true;
-      }
-    }
-
-    const isRecent = recentSet.has(songId);
-    const recencyPenalty = isRecent ? cfg.RECENTLY_SUNG_PENALTY : 0;
-
-    const rawScore = baseScore + priorityBonus + favoriteBonus - recencyPenalty;
-    const topPriority: Priority = hasHigh ? 'HIGH' : hasWant ? 'WANT_TO_SING' : 'NORMAL';
-
-    candidates.push({
+  for (const [songId, entries] of bySong) {
+    const song = songs.get(songId);
+    if (!song || entries.length < 2 || (!input.recycleMode && used.has(songId))) continue;
+    const priorities = entries.map(entry => entry.priority);
+    const priority = entries.reduce((sum, entry) => sum + (
+      entry.priority === 'HIGH'
+        ? cfg.HIGH_PRIORITY_BONUS
+        : entry.priority === 'WANT_TO_SING'
+          ? cfg.WANT_TO_SING_BONUS
+          : 0
+    ), 0);
+    const favorites = entries.filter(entry => entry.favorite).length;
+    result.push({
       song,
-      memberIds: matchedMemberIds,
-      members: matchedMembers,
-      matchCount,
-      baseScore,
-      priorityBonus,
-      favoriteBonus,
-      recencyPenalty,
-      rawScore,
-      topPriority,
-      hasFavorite: hasFav,
+      eligibleSingerIds: entries.map(entry => entry.user_id).sort(),
+      compatibility: entries.length * cfg.COMMON_MEMBER_WEIGHT,
+      priority,
+      favorite: favorites * cfg.FAVORITE_BONUS,
+      recentHistoryPenalty: recent.has(songId) ? cfg.RECENT_HISTORY_PENALTY : 0,
+      topPriority: priorities.includes('HIGH') ? 'HIGH' : priorities.includes('WANT_TO_SING') ? 'WANT_TO_SING' : 'NORMAL',
+      hasFavorite: favorites > 0,
     });
   }
+  return result;
+}
 
-  // Step 4: Fairness Interleaving
-  // Initial sort: higher rawScore first, then higher matchCount, then alphabetically
-  candidates.sort((a, b) => {
-    if (b.rawScore !== a.rawScore) {
-      return b.rawScore - a.rawScore;
-    }
-    if (b.matchCount !== a.matchCount) {
-      return b.matchCount - a.matchCount;
-    }
-    return a.song.title.localeCompare(b.song.title);
+function historyState(memberIds: string[], history: QueueHistoryItem[]): EngineState {
+  const turns = new Map(memberIds.map(id => [id, 0]));
+  const pairs = new Map<string, number>();
+  const partners = new Map<string, Set<string>>(memberIds.map(id => [id, new Set<string>()]));
+  const lastSeen = new Map<string, number>();
+  let previous: [string, string] | null = null;
+
+  history.forEach((item, index) => {
+    const [a, b] = item.singerIds;
+    turns.set(a, (turns.get(a) ?? 0) + 1);
+    turns.set(b, (turns.get(b) ?? 0) + 1);
+    const key = pairKey(a, b);
+    pairs.set(key, (pairs.get(key) ?? 0) + 1);
+    partners.get(a)?.add(b);
+    partners.get(b)?.add(a);
+    lastSeen.set(a, index);
+    lastSeen.set(b, index);
+    previous = [a, b];
   });
 
-  // Track how many songs have been allocated to each member in the top playlist
-  const memberPlacementCount = new Map<string, number>();
-  selectedMemberIds.forEach(id => memberPlacementCount.set(id, 0));
+  return { turns, pairs, partners, lastSeen, previous, position: history.length };
+}
 
-  const result: SongRecommendation[] = [];
-  const remainingCandidates = [...candidates];
+function scorePair(
+  a: string,
+  b: string,
+  state: ReturnType<typeof historyState>,
+  cfg: RecommendationConfig,
+) {
+  const maximumTurns = Math.max(0, ...state.turns.values());
+  const fairness = (maximumTurns * 2 - (state.turns.get(a) ?? 0) - (state.turns.get(b) ?? 0)) * cfg.FAIRNESS_WEIGHT;
+  const restA = state.lastSeen.has(a) ? state.position - state.lastSeen.get(a)! - 1 : 5;
+  const restB = state.lastSeen.has(b) ? state.position - state.lastSeen.get(b)! - 1 : 5;
+  const rest = (Math.min(restA, 5) + Math.min(restB, 5)) * cfg.REST_WEIGHT;
+  const repeats = state.pairs.get(pairKey(a, b)) ?? 0;
+  const repeatedPairPenalty = repeats * cfg.REPEATED_PAIR_PENALTY;
+  const pairDiversity = repeats === 0 ? cfg.PAIR_DIVERSITY_BONUS : 0;
+  const previousSet = new Set<string>(state.previous ?? []);
+  const consecutiveSingerPenalty = (Number(previousSet.has(a)) + Number(previousSet.has(b))) * cfg.CONSECUTIVE_SINGER_PENALTY;
+  return { fairness, rest, pairDiversity, repeatedPairPenalty, consecutiveSingerPenalty };
+}
 
-  while (remainingCandidates.length > 0) {
-    let bestIndex = 0;
-    let bestScoreWithFairness = -Infinity;
-    let bestFairnessBonus = 0;
-
-    // Evaluate candidates at the top of the pool (within window of 5 items or close scores)
-    const windowSize = Math.min(5, remainingCandidates.length);
-
-    for (let i = 0; i < windowSize; i++) {
-      const candidate = remainingCandidates[i];
-
-      // Calculate fairness bonus:
-      // If a song is shared by multiple members, it doesn't need fairness boost.
-      // If it's a single member's song, reward members who have fewer songs placed so far.
-      let fairnessBonus = 0;
-      if (candidate.matchCount === 1) {
-        const memberId = candidate.memberIds[0];
-        const placed = memberPlacementCount.get(memberId) || 0;
-        const minPlaced = Math.min(...Array.from(memberPlacementCount.values()));
-
-        // If this member has minimal placements, give fairness bonus
-        if (placed === minPlaced) {
-          fairnessBonus = cfg.FAIRNESS_BONUS;
-        }
-      }
-
-      // Overlap consensus ALWAYS dominates (difference of COMMON_MEMBER_WEIGHT is usually 10 points),
-      // fairnessBonus (e.g. 2 points) only reorders candidates with close or equal scores.
-      const adjustedScore = candidate.rawScore + fairnessBonus;
-
-      if (adjustedScore > bestScoreWithFairness) {
-        bestScoreWithFairness = adjustedScore;
-        bestIndex = i;
-        bestFairnessBonus = fairnessBonus;
+function bestPair(candidate: Candidate, state: ReturnType<typeof historyState>, cfg: RecommendationConfig) {
+  let winner: { pair: [string, string]; values: ReturnType<typeof scorePair>; score: number } | null = null;
+  for (let i = 0; i < candidate.eligibleSingerIds.length; i += 1) {
+    for (let j = i + 1; j < candidate.eligibleSingerIds.length; j += 1) {
+      const pair: [string, string] = [candidate.eligibleSingerIds[i], candidate.eligibleSingerIds[j]];
+      const values = scorePair(pair[0], pair[1], state, cfg);
+      const score = values.fairness + values.rest + values.pairDiversity
+        - values.repeatedPairPenalty - values.consecutiveSingerPenalty;
+      if (!winner || score > winner.score || (score === winner.score && pairKey(...pair) < pairKey(...winner.pair))) {
+        winner = { pair, values, score };
       }
     }
-
-    const [selectedItem] = remainingCandidates.splice(bestIndex, 1);
-
-    // Update placement counts for all members who know/have this song
-    selectedItem.memberIds.forEach(id => {
-      memberPlacementCount.set(id, (memberPlacementCount.get(id) || 0) + 1);
-    });
-
-    result.push({
-      song: selectedItem.song,
-      memberIds: selectedItem.memberIds,
-      members: selectedItem.members,
-      matchCount: selectedItem.matchCount,
-      totalParticipants,
-      score: selectedItem.rawScore + bestFairnessBonus,
-      scoreBreakdown: {
-        commonOverlapScore: selectedItem.baseScore,
-        priorityBonus: selectedItem.priorityBonus,
-        favoriteBonus: selectedItem.favoriteBonus,
-        recencyPenalty: selectedItem.recencyPenalty,
-        fairnessBonus: bestFairnessBonus,
-      },
-      isRecentlySung: selectedItem.recencyPenalty > 0,
-      topPriority: selectedItem.topPriority,
-      hasFavorite: selectedItem.hasFavorite,
-    });
   }
+  return winner!;
+}
 
-  return result;
+export function generateKaraokePlaylist(input: GeneratePlaylistInput): SongRecommendation[] {
+  const cfg = { ...DEFAULT_RECOMMENDATION_CONFIG, ...input.config };
+  const memberIds = [...new Set(input.selectedMemberIds)].sort();
+  if (memberIds.length < 2) return [];
+  const validMemberIds = new Set(input.members.map(member => member.id));
+  const selected = memberIds.filter(id => validMemberIds.has(id));
+  if (selected.length < 2) return [];
+
+  const history = input.sessionHistory ?? [];
+  const state = historyState(selected, history);
+  const candidates = buildCandidates({ ...input, selectedMemberIds: selected }, cfg);
+  const output: SongRecommendation[] = [];
+  const cap = Math.max(0, Math.min(input.limit ?? cfg.MAX_BATCH_SIZE, cfg.MAX_BATCH_SIZE));
+
+  while (candidates.length > 0 && output.length < cap) {
+    let winnerIndex = 0;
+    let winnerPair = bestPair(candidates[0], state, cfg);
+    let winnerScore = -Infinity;
+
+    candidates.forEach((candidate, index) => {
+      const pairing = bestPair(candidate, state, cfg);
+      const total = candidate.compatibility + candidate.priority + candidate.favorite
+        + pairing.score - candidate.recentHistoryPenalty;
+      const winnerId = candidates[winnerIndex]?.song.id ?? '';
+      if (total > winnerScore || (total === winnerScore && candidate.song.id < winnerId)) {
+        winnerIndex = index;
+        winnerPair = pairing;
+        winnerScore = total;
+      }
+    });
+
+    const [candidate] = candidates.splice(winnerIndex, 1);
+    const [a, b] = winnerPair.pair;
+    const breakdown: RecommendationScoreBreakdown = {
+      compatibility: candidate.compatibility,
+      priority: candidate.priority,
+      favorite: candidate.favorite,
+      pairDiversity: winnerPair.values.pairDiversity,
+      fairness: winnerPair.values.fairness,
+      rest: winnerPair.values.rest,
+      repeatedPairPenalty: winnerPair.values.repeatedPairPenalty,
+      consecutiveSingerPenalty: winnerPair.values.consecutiveSingerPenalty,
+      recentHistoryPenalty: candidate.recentHistoryPenalty,
+    };
+    output.push({
+      song: candidate.song,
+      eligibleSingerIds: candidate.eligibleSingerIds,
+      singerIds: [a, b],
+      matchCount: candidate.eligibleSingerIds.length,
+      totalParticipants: selected.length,
+      score: winnerScore,
+      scoreBreakdown: breakdown,
+      topPriority: candidate.topPriority,
+      hasFavorite: candidate.hasFavorite,
+      recycleMode: Boolean(input.recycleMode),
+    });
+
+    state.turns.set(a, (state.turns.get(a) ?? 0) + 1);
+    state.turns.set(b, (state.turns.get(b) ?? 0) + 1);
+    const key = pairKey(a, b);
+    state.pairs.set(key, (state.pairs.get(key) ?? 0) + 1);
+    state.partners.get(a)?.add(b);
+    state.partners.get(b)?.add(a);
+    state.lastSeen.set(a, state.position);
+    state.lastSeen.set(b, state.position);
+    state.previous = [a, b];
+    state.position += 1;
+  }
+  return output;
+}
+
+export function inspectAvailability(input: GeneratePlaylistInput): Availability {
+  const cfg = { ...DEFAULT_RECOMMENDATION_CONFIG, ...input.config };
+  const eligibleSongs = buildCandidates({ ...input, recycleMode: true }, cfg).length;
+  const unusedSongs = buildCandidates({ ...input, recycleMode: false }, cfg).length;
+  return { eligibleSongs, unusedSongs, exhausted: eligibleSongs > 0 && unusedSongs === 0 };
+}
+
+export function calculateSessionStats(memberIds: string[], history: QueueHistoryItem[]): SessionStats {
+  const state = historyState(memberIds, history);
+  return {
+    turnsByMember: Object.fromEntries(state.turns),
+    pairCounts: Object.fromEntries(state.pairs),
+    uniquePartnersByMember: Object.fromEntries([...state.partners].map(([id, values]) => [id, [...values].sort()])),
+    songsQueued: history.filter(item => item.state === 'QUEUED').length,
+    songsPlayed: history.filter(item => item.state === 'PLAYED').length,
+  };
 }

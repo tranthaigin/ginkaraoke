@@ -26,7 +26,8 @@ export function normalizeSongTitle(rawTitle: string): string {
 
   // Remove common karaoke / cover / remix / mv decorators inside parentheses/brackets
   title = title
-    .replace(/\s*[\(\[\{][^\)\]\}]*(?:karaoke|beat|instrumental|official|mv|audio|lyric|lyrics|cover|video|remix)[^\)\]\}]*[\)\]\}]\s*/gi, ' ')
+    .replace(/\s*[([{][^)\]}]*(?:karaoke|beat|instrumental|official|mv|audio|lyric|lyrics|cover|video|remix)[^)\]}]*[)\]}]\s*/gi, ' ')
+    .replace(/\s+(?:karaoke|beat|instrumental|official(?:\s+mv)?|mv|audio|lyrics?|cover|video)(?:\s+version)?\s*$/gi, ' ')
     .replace(/[«»""''`]/g, '')
     .replace(/[-_–—]/g, ' ')
     .replace(/[!?,.:;~#$^*+=]/g, ' ');
@@ -43,7 +44,9 @@ export function normalizeSongTitle(rawTitle: string): string {
  */
 export function normalizeArtist(rawArtist: string = ''): string {
   if (!rawArtist) return '';
-  const cleaned = rawArtist.normalize('NFC').toLowerCase().trim().replace(/\s+/g, ' ');
+  const cleaned = rawArtist.normalize('NFC').toLowerCase().trim()
+    .replace(/[-_–—.,'"`]/g, ' ')
+    .replace(/\s+/g, ' ');
   return removeVietnameseDiacritics(cleaned);
 }
 

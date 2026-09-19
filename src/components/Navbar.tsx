@@ -1,208 +1,191 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { NavLink } from 'react-router-dom';
+import { Check, ChevronDown, Cloud, Copy, History, Home, LogOut, Mic, Music, Users, WifiOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { WifiOff, Cloud, Copy, Check, ChevronDown } from 'lucide-react';
+import { GinKaraokeLogo } from './GinKaraokeLogo';
+import { MemberAvatar } from './MemberAvatar';
 
-export const Navbar: React.FC = () => {
-  const {
-    currentGroup,
-    currentMember,
-    members,
-    setCurrentMember,
-    isOnline,
-    isCloudConnected,
-    showToast
-  } = useApp();
-
+export function Navbar() {
+  const { currentGroup, groups, profile, isOnline, selectGroup, signOut, showToast } = useApp();
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [showMemberMenu, setShowMemberMenu] = useState(false);
 
-  const handleCopyCode = () => {
+  const copyCode = async () => {
     if (!currentGroup) return;
-    navigator.clipboard.writeText(currentGroup.join_code);
-    setCopied(true);
-    showToast(`Đã sao chép mã nhóm: ${currentGroup.join_code}`, 'info');
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(currentGroup.join_code);
+      setCopied(true);
+      showToast('Đã sao chép mã tham gia nhóm! 📋', 'success');
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast('Không thể sao chép mã.', 'error');
+    }
   };
 
   return (
-    <header style={{
-      height: 'var(--header-height)',
-      padding: '0 16px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      borderBottom: '1px solid var(--border-subtle)',
-      background: 'rgba(11, 16, 26, 0.85)',
-      backdropFilter: 'blur(16px)',
-      position: 'sticky',
-      top: 0,
-      zIndex: 800,
-      maxWidth: '100%',
-    }}>
-      {/* Group Info & Join Code */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '8px',
-          background: 'var(--grad-primary)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '1.1rem',
-          boxShadow: '0 2px 10px var(--neon-purple-glow)'
-        }}>
-          🎤
+    <header className="topbar">
+      <div className="topbar-inner">
+        {/* Brand & Active Group Lockup */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+          <NavLink to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
+            <GinKaraokeLogo size="sm" glow={true} />
+          </NavLink>
+
+          <button
+            className="brand-button"
+            onClick={() => void copyCode()}
+            aria-label="Sao chép mã nhóm"
+            title="Nhấn để sao chép mã nhóm"
+          >
+            <div>
+              <strong>{currentGroup?.name ?? 'GinKaraoke'}</strong>
+              <small>
+                <span>{currentGroup?.join_code}</span>
+                {copied ? (
+                  <Check size={12} color="var(--emerald-400)" />
+                ) : (
+                  <Copy size={11} style={{ opacity: 0.7 }} />
+                )}
+              </small>
+            </div>
+          </button>
         </div>
-        <div>
-          <div style={{
-            fontSize: '0.85rem',
-            fontWeight: 700,
-            lineHeight: 1.1,
-            color: 'var(--text-primary)',
-            maxWidth: '130px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap'
-          }}>
-            {currentGroup ? currentGroup.name : 'GinKaraoke'}
-          </div>
-          {currentGroup && (
+
+        {/* Center Desktop Navigation Bar (>=1024px) */}
+        <nav className="desktop-nav" aria-label="Điều hướng desktop">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `desktop-nav-link ${isActive ? 'active' : ''}`}
+          >
+            <Home size={17} />
+            <span>Trang chủ</span>
+          </NavLink>
+
+          <NavLink
+            to="/my-songs"
+            className={({ isActive }) => `desktop-nav-link ${isActive ? 'active' : ''}`}
+          >
+            <Music size={17} />
+            <span>Bài của tôi</span>
+          </NavLink>
+
+          <NavLink
+            to="/karaoke"
+            className={({ isActive }) => `desktop-nav-link mic-link ${isActive ? 'active' : ''}`}
+          >
+            <Mic size={17} />
+            <span>Phòng Karaoke</span>
+          </NavLink>
+
+          <NavLink
+            to="/history"
+            className={({ isActive }) => `desktop-nav-link ${isActive ? 'active' : ''}`}
+          >
+            <History size={17} />
+            <span>Lịch sử</span>
+          </NavLink>
+
+          <NavLink
+            to="/group"
+            className={({ isActive }) => `desktop-nav-link ${isActive ? 'active' : ''}`}
+          >
+            <Users size={17} />
+            <span>Hội bạn</span>
+          </NavLink>
+        </nav>
+
+        {/* Right Topbar Actions */}
+        <div className="topbar-actions">
+          {/* Connectivity Status Badge */}
+          <span
+            className={`badge ${isOnline ? 'badge-emerald' : 'badge-rose'}`}
+            style={{ cursor: 'default' }}
+            title={isOnline ? 'Đã đồng bộ với Cloud' : 'Chế độ ngoại tuyến - Chỉ đọc'}
+          >
+            {isOnline ? <Cloud size={12} /> : <WifiOff size={12} />}
+            <span className="hide-on-mobile-sm">{isOnline ? 'Cloud' : 'Offline'}</span>
+          </span>
+
+          {/* Account Menu */}
+          <div className="account-menu">
             <button
-              onClick={handleCopyCode}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                color: 'var(--neon-cyan)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-              title="Nhấn để sao chép mã nhóm"
+              className="account-button"
+              onClick={() => setOpen(val => !val)}
+              aria-expanded={open}
+              aria-label="Tài khoản cá nhân"
             >
-              <span>{currentGroup.join_code}</span>
-              {copied ? <Check size={11} color="#34d399" /> : <Copy size={11} />}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Right Side: Network & Member Switcher */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {/* Network / Storage Status */}
-        {!isOnline ? (
-          <div
-            className="badge badge-rose"
-            style={{ fontSize: '0.7rem', padding: '2px 6px' }}
-            title="Mất mạng - Đang dùng dữ liệu offline bộ nhớ tạm"
-          >
-            <WifiOff size={12} />
-            <span>Offline</span>
-          </div>
-        ) : isCloudConnected ? (
-          <div
-            className="badge badge-emerald"
-            style={{ fontSize: '0.7rem', padding: '2px 6px' }}
-            title="Đã kết nối Supabase Cloud & Realtime"
-          >
-            <Cloud size={12} />
-            <span>Cloud</span>
-          </div>
-        ) : (
-          <div
-            className="badge badge-amber"
-            style={{ fontSize: '0.7rem', padding: '2px 6px' }}
-            title="Chế độ Local Mock (Chưa cấu hình Supabase)"
-          >
-            <span>Local</span>
-          </div>
-        )}
-
-        {/* Member Switcher Dropdown */}
-        {currentMember && (
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowMemberMenu(v => !v)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-full)',
-                padding: '4px 10px 4px 6px',
-                color: 'var(--text-primary)',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              <span style={{ fontSize: '1rem' }}>{currentMember.avatar || '🎤'}</span>
-              <span style={{ maxWidth: '60px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {currentMember.display_name}
-              </span>
-              <ChevronDown size={14} color="var(--text-muted)" />
-            </button>
-
-            {/* Dropdown Menu */}
-            {showMemberMenu && (
-              <div
+              <MemberAvatar profile={profile} size="xs" />
+              <span>{profile?.display_name?.split(' ')[0] ?? 'Tôi'}</span>
+              <ChevronDown
+                size={14}
                 style={{
-                  position: 'absolute',
-                  top: '110%',
-                  right: 0,
-                  width: '180px',
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md)',
-                  boxShadow: 'var(--shadow-md)',
-                  padding: '6px',
-                  zIndex: 1000,
+                  transform: open ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.2s ease',
                 }}
-              >
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', padding: '4px 8px', fontWeight: 600 }}>
-                  CHỌN BẠN LÀ AI:
+              />
+            </button>
+
+            {open && (
+              <div className="dropdown" onClick={e => e.stopPropagation()}>
+                {/* Profile summary */}
+                <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid var(--border-subtle)' }}>
+                  <p style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                    {profile?.display_name}
+                  </p>
+                  <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    {currentGroup?.name}
+                  </p>
                 </div>
-                {members.map(m => (
+
+                {/* Group Switcher */}
+                {groups.length > 1 && (
+                  <div style={{ padding: '4px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                    <p className="dropdown-label">CHUYỂN NHÓM ({groups.length})</p>
+                    {groups.map(group => (
+                      <button
+                        key={group.id}
+                        onClick={() => {
+                          void selectGroup(group);
+                          setOpen(false);
+                        }}
+                        style={{
+                          color: group.id === currentGroup?.id ? 'var(--neon-cyan)' : 'var(--text-primary)',
+                          fontWeight: group.id === currentGroup?.id ? 700 : 500,
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Users size={14} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>
+                            {group.name}
+                          </span>
+                        </span>
+                        {group.id === currentGroup?.id && <Check size={14} color="var(--neon-cyan)" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Logout */}
+                <div style={{ paddingTop: '4px' }}>
                   <button
-                    key={m.id}
+                    className="danger-text"
                     onClick={() => {
-                      setCurrentMember(m);
-                      setShowMemberMenu(false);
-                      showToast(`Đã chuyển sang bạn: ${m.display_name}`, 'info');
-                    }}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      background: m.id === currentMember.id ? 'rgba(168, 85, 247, 0.18)' : 'transparent',
-                      color: m.id === currentMember.id ? 'var(--neon-purple)' : 'var(--text-primary)',
-                      border: 'none',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '8px 10px',
-                      fontSize: '0.84rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      textAlign: 'left',
+                      setOpen(false);
+                      void signOut();
                     }}
                   >
-                    <span>{m.avatar}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {m.display_name}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <LogOut size={14} />
+                      <span>Đăng xuất</span>
                     </span>
-                    {m.id === currentMember.id && <Check size={14} />}
                   </button>
-                ))}
+                </div>
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );
-};
+}

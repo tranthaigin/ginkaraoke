@@ -30,6 +30,7 @@ describe('Vietnamese Song Normalization', () => {
     expect(normalizeSongTitle('Bạc Phận [Beat]')).toBe('bac phan');
     expect(normalizeSongTitle('Sóng Gió (Cover)')).toBe('song gio');
     expect(normalizeSongTitle('Chúng Ta Của Tương Lai (Official MV)')).toBe('chung ta cua tuong lai');
+    expect(normalizeSongTitle('Nơi Này Có Anh Karaoke')).toBe('noi nay co anh');
   });
 
   it('should NOT merge distinct songs', () => {

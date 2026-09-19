@@ -1,176 +1,152 @@
-import { describe, it, expect } from 'vitest';
-import { generateKaraokePlaylist } from './engine';
-import { Member, Song, MemberSong } from '../../types';
+import { describe, expect, it } from 'vitest';
+import type { Member, MemberSong, QueueHistoryItem, Song } from '../../types';
+import { calculateSessionStats, generateKaraokePlaylist, inspectAvailability } from './engine';
 
-describe('Recommendation & Fairness Engine', () => {
-  // Test Data Setup: Qt, Huy, Khang
-  const qt: Member = { id: 'm-qt', group_id: 'g1', display_name: 'Qt', avatar: '😎' };
-  const huy: Member = { id: 'm-huy', group_id: 'g1', display_name: 'Huy', avatar: '🤠' };
-  const khang: Member = { id: 'm-khang', group_id: 'g1', display_name: 'Khang', avatar: '🥳' };
-  const nam: Member = { id: 'm-nam', group_id: 'g1', display_name: 'Nam', avatar: '😇' }; // Not attending
+const members: Member[] = ['A', 'B', 'C', 'D', 'E'].map(id => ({ id, display_name: id }));
+const songs: Song[] = Array.from({ length: 70 }, (_, index) => ({
+  id: `s${String(index).padStart(2, '0')}`,
+  title: `Song ${index}`,
+  artist: 'Artist',
+  normalized_title: `song ${index}`,
+  normalized_artist: 'artist',
+}));
 
-  const members = [qt, huy, khang, nam];
-
-  const songNoiNayCoAnh: Song = { id: 's1', title: 'Nơi này có anh', artist: 'Sơn Tùng M-TP', normalized_title: 'noi nay co anh' };
-  const songBacPhan: Song = { id: 's2', title: 'Bạc phận', artist: 'Jack x K-ICM', normalized_title: 'bac phan' };
-  const songSongGio: Song = { id: 's3', title: 'Sóng gió', artist: 'Jack x K-ICM', normalized_title: 'song gio' };
-  const songChungTa: Song = { id: 's4', title: 'Chúng ta của tương lai', artist: 'Sơn Tùng M-TP', normalized_title: 'chung ta cua tuong lai' };
-  const songNamSolo: Song = { id: 's5', title: 'Lạc trôi', artist: 'Sơn Tùng M-TP', normalized_title: 'lac troi' };
-
-  const allSongs = [songNoiNayCoAnh, songBacPhan, songSongGio, songChungTa, songNamSolo];
-
-  // Qt: Nơi này có anh, Bạc phận, Sóng gió
-  // Huy: Nơi này có anh, Bạc phận, Chúng ta của tương lai
-  // Khang: Nơi này có anh, Sóng gió, Chúng ta của tương lai
-  // Nam: Lạc trôi
-  const memberSongs: MemberSong[] = [
-    // Qt
-    { id: 'ms1', member_id: 'm-qt', song_id: 's1', favorite: true, priority: 'HIGH' },
-    { id: 'ms2', member_id: 'm-qt', song_id: 's2', favorite: false, priority: 'WANT_TO_SING' },
-    { id: 'ms3', member_id: 'm-qt', song_id: 's3', favorite: false, priority: 'NORMAL' },
-    // Huy
-    { id: 'ms4', member_id: 'm-huy', song_id: 's1', favorite: false, priority: 'NORMAL' },
-    { id: 'ms5', member_id: 'm-huy', song_id: 's2', favorite: true, priority: 'HIGH' },
-    { id: 'ms6', member_id: 'm-huy', song_id: 's4', favorite: false, priority: 'WANT_TO_SING' },
-    // Khang
-    { id: 'ms7', member_id: 'm-khang', song_id: 's1', favorite: false, priority: 'NORMAL' },
-    { id: 'ms8', member_id: 'm-khang', song_id: 's3', favorite: true, priority: 'HIGH' },
-    { id: 'ms9', member_id: 'm-khang', song_id: 's4', favorite: false, priority: 'NORMAL' },
-    // Nam
-    { id: 'ms10', member_id: 'm-nam', song_id: 's5', favorite: true, priority: 'HIGH' },
+const memberships: MemberSong[] = songs.flatMap((song, index) => {
+  const eligible = index === 0 ? ['A', 'B', 'C', 'D', 'E'] : index === 1 ? ['A', 'B'] : [
+    members[index % members.length].id,
+    members[(index + 1) % members.length].id,
+    ...(index % 3 === 0 ? [members[(index + 2) % members.length].id] : []),
   ];
+  return [...new Set(eligible)].map((userId, entryIndex) => ({
+    id: `${song.id}-${userId}`,
+    user_id: userId,
+    song_id: song.id,
+    favorite: entryIndex === 0 && index % 4 === 0,
+    priority: index % 5 === 0 ? 'HIGH' as const : 'NORMAL' as const,
+  }));
+});
 
-  it('should generate ranked playlist prioritizing songs with highest common member overlap', () => {
+const base = { selectedMemberIds: members.map(member => member.id), members, memberSongs: memberships, allSongs: songs };
+const toHistory = (result: ReturnType<typeof generateKaraokePlaylist>): QueueHistoryItem[] => result.map(item => ({
+  songId: item.song.id,
+  singerIds: item.singerIds,
+  state: 'QUEUED',
+}));
+
+describe('deterministic duet recommendation engine', () => {
+  it('handles exactly two members sharing one song', () => {
+    const twoMemberSong = memberships.filter(item => item.song_id === 's01');
     const result = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt', 'm-huy', 'm-khang'],
-      members,
-      memberSongs,
-      allSongs,
+      selectedMemberIds: ['A', 'B'], members, memberSongs: twoMemberSong, allSongs: [songs[1]],
     });
-
-    expect(result.length).toBe(4);
-
-    // "Nơi này có anh" is known by all 3/3 members -> MUST be rank 1
-    expect(result[0].song.title).toBe('Nơi này có anh');
-    expect(result[0].matchCount).toBe(3);
-    expect(result[0].totalParticipants).toBe(3);
-
-    // Other songs have 2/3 members
-    const titles2of3 = result.slice(1).map(r => r.song.title);
-    expect(titles2of3).toContain('Bạc phận');
-    expect(titles2of3).toContain('Sóng gió');
-    expect(titles2of3).toContain('Chúng ta của tương lai');
-
-    // Nam is not selected, so "Lạc trôi" MUST NOT be in the result
-    expect(result.some(r => r.song.title === 'Lạc trôi')).toBe(false);
+    expect(result).toHaveLength(1);
+    expect(result[0].singerIds).toEqual(['A', 'B']);
   });
 
-  it('should exclusively consider selected attendees and exclude absent members', () => {
-    // Only Qt and Huy attend
-    const result = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt', 'm-huy'],
-      members,
-      memberSongs,
-      allSongs,
-    });
-
-    // Songs known by both Qt & Huy
-    const firstTwo = result.slice(0, 2).map(r => r.song.title);
-    expect(firstTwo).toContain('Nơi này có anh');
-    expect(firstTwo).toContain('Bạc phận');
-
-    // Sóng gió (known by Qt only in this group of 2) -> 1/2
-    const songGioRec = result.find(r => r.song.title === 'Sóng gió');
-    expect(songGioRec?.matchCount).toBe(1);
-    expect(songGioRec?.totalParticipants).toBe(2);
-
-    // Khang and Nam exclusive songs are not present
-    expect(result.some(r => r.song.title === 'Lạc trôi')).toBe(false);
+  it('assigns exactly two eligible singers to a shared song', () => {
+    const result = generateKaraokePlaylist({ ...base, limit: 1 });
+    expect(result[0].singerIds).toHaveLength(2);
+    expect(result[0].singerIds.every(id => result[0].eligibleSingerIds.includes(id))).toBe(true);
   });
 
-  it('should correctly apply priority bonus and favorite bonus', () => {
-    // Single attendee: Qt
-    const result = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt'],
-      members,
-      memberSongs,
-      allSongs,
-    });
-
-    // Qt has:
-    // Nơi này có anh: favorite=true (+3), priority=HIGH (+5), base=10 => rawScore 18
-    // Bạc phận: favorite=false, priority=WANT_TO_SING (+2), base=10 => rawScore 12
-    // Sóng gió: favorite=false, priority=NORMAL (+0), base=10 => rawScore 10
-    const noiNay = result.find(r => r.song.title === 'Nơi này có anh');
-    const bacPhan = result.find(r => r.song.title === 'Bạc phận');
-    const songGio = result.find(r => r.song.title === 'Sóng gió');
-
-    expect(noiNay?.scoreBreakdown.favoriteBonus).toBe(3);
-    expect(noiNay?.scoreBreakdown.priorityBonus).toBe(5);
-    expect(noiNay?.score).toBeGreaterThan(bacPhan!.score);
-    expect(bacPhan?.score).toBeGreaterThan(songGio!.score);
+  it('ranks a song known by many participants strongly', () => {
+    expect(generateKaraokePlaylist({ ...base, limit: 1 })[0].song.id).toBe('s00');
   });
 
-  it('should apply recently sung penalty to reduce score without outright blocking the song', () => {
-    // When "Nơi này có anh" was recently sung
-    const withoutPenalty = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt', 'm-huy', 'm-khang'],
-      members,
-      memberSongs,
-      allSongs,
-      recentlySungSongIds: [],
-    });
-
-    const withPenalty = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt', 'm-huy', 'm-khang'],
-      members,
-      memberSongs,
-      allSongs,
-      recentlySungSongIds: ['s1'], // Nơi này có anh
-    });
-
-    const scoreBefore = withoutPenalty.find(r => r.song.id === 's1')!.score;
-    const scoreAfter = withPenalty.find(r => r.song.id === 's1')!.score;
-
-    expect(scoreAfter).toBe(scoreBefore - 5);
-    expect(withPenalty.find(r => r.song.id === 's1')?.isRecentlySung).toBe(true);
+  it('rotates pairs dynamically when compatibility permits', () => {
+    const pairs = generateKaraokePlaylist({ ...base, limit: 12 }).map(item => item.singerIds.join('+'));
+    expect(new Set(pairs).size).toBeGreaterThan(3);
   });
 
-  it('should return an empty array if no members are selected', () => {
-    const result = generateKaraokePlaylist({
-      selectedMemberIds: [],
-      members,
-      memberSongs,
-      allSongs,
-    });
-
-    expect(result).toEqual([]);
+  it('penalizes a repeated pair when an alternative exists', () => {
+    const history: QueueHistoryItem[] = [{ songId: 'old', singerIds: ['A', 'B'], state: 'PLAYED' }];
+    const result = generateKaraokePlaylist({ ...base, sessionHistory: history, limit: 1 });
+    expect(result[0].singerIds).not.toEqual(['A', 'B']);
   });
 
-  it('should apply fairness bonus to balance solo songs between members', () => {
-    // Create scenario: Qt has 3 solo songs, Huy has 1 solo song
-    const soloQt1: Song = { id: 'sq1', title: 'Qt Solo 1', artist: 'A', normalized_title: 'qt solo 1' };
-    const soloQt2: Song = { id: 'sq2', title: 'Qt Solo 2', artist: 'A', normalized_title: 'qt solo 2' };
-    const soloQt3: Song = { id: 'sq3', title: 'Qt Solo 3', artist: 'A', normalized_title: 'qt solo 3' };
-    const soloHuy1: Song = { id: 'sh1', title: 'Huy Solo 1', artist: 'B', normalized_title: 'huy solo 1' };
+  it('penalizes singers who just sang', () => {
+    const history: QueueHistoryItem[] = [{ songId: 'old', singerIds: ['A', 'B'], state: 'PLAYED' }];
+    const shared = memberships.filter(item => item.song_id === 's00');
+    const result = generateKaraokePlaylist({ ...base, memberSongs: shared, allSongs: [songs[0]], sessionHistory: history });
+    expect(result[0].singerIds.every(id => !['A', 'B'].includes(id))).toBe(true);
+  });
 
-    const customSongs = [soloQt1, soloQt2, soloQt3, soloHuy1];
-    const customMemberSongs: MemberSong[] = [
-      { id: 'msq1', member_id: 'm-qt', song_id: 'sq1', favorite: false, priority: 'NORMAL' },
-      { id: 'msq2', member_id: 'm-qt', song_id: 'sq2', favorite: false, priority: 'NORMAL' },
-      { id: 'msq3', member_id: 'm-qt', song_id: 'sq3', favorite: false, priority: 'NORMAL' },
-      { id: 'msh1', member_id: 'm-huy', song_id: 'sh1', favorite: false, priority: 'NORMAL' },
+  it('makes rested valid singers more likely', () => {
+    const history: QueueHistoryItem[] = [
+      { songId: 'x', singerIds: ['A', 'B'], state: 'PLAYED' },
+      { songId: 'y', singerIds: ['A', 'C'], state: 'PLAYED' },
     ];
+    const result = generateKaraokePlaylist({ ...base, memberSongs: memberships.filter(item => item.song_id === 's00'), allSongs: [songs[0]], sessionHistory: history });
+    expect(result[0].singerIds).toEqual(['D', 'E']);
+  });
 
-    const result = generateKaraokePlaylist({
-      selectedMemberIds: ['m-qt', 'm-huy'],
-      members: [qt, huy],
-      memberSongs: customMemberSongs,
-      allSongs: customSongs,
-    });
+  it('keeps turns reasonably balanced with compatible data', () => {
+    const result = generateKaraokePlaylist({ ...base, limit: 40 });
+    const stats = calculateSessionStats(members.map(member => member.id), toHistory(result));
+    const turns = Object.values(stats.turnsByMember);
+    expect(Math.max(...turns) - Math.min(...turns)).toBeLessThanOrEqual(3);
+  });
 
-    expect(result.length).toBe(4);
-    // Fairness bonus should be applied to candidates to prevent a single person from taking all slots
-    expect(result.some(r => r.scoreBreakdown.fairnessBonus > 0)).toBe(true);
+  it('never assigns a singer who does not know a song', () => {
+    const result = generateKaraokePlaylist(base);
+    expect(result.every(item => item.singerIds.every(id => item.eligibleSingerIds.includes(id)))).toBe(true);
+  });
+
+  it('returns at most 50 entries by default', () => {
+    expect(generateKaraokePlaylist(base)).toHaveLength(50);
+  });
+
+  it('excludes all queued songs from the second normal batch', () => {
+    const first = generateKaraokePlaylist({ ...base, limit: 20 });
+    const second = generateKaraokePlaylist({ ...base, sessionHistory: toHistory(first), limit: 50 });
+    const firstIds = new Set(first.map(item => item.song.id));
+    expect(second.every(item => !firstIds.has(item.song.id))).toBe(true);
+  });
+
+  it('excludes played songs from normal generation', () => {
+    const history: QueueHistoryItem[] = [{ songId: 's00', singerIds: ['A', 'B'], state: 'PLAYED' }];
+    expect(generateKaraokePlaylist({ ...base, sessionHistory: history }).some(item => item.song.id === 's00')).toBe(false);
+  });
+
+  it('returns 17 when only 17 unused eligible songs remain', () => {
+    const history: QueueHistoryItem[] = songs.slice(0, 53).map(song => ({ songId: song.id, singerIds: ['A', 'B'], state: 'QUEUED' }));
+    expect(generateKaraokePlaylist({ ...base, sessionHistory: history })).toHaveLength(17);
+  });
+
+  it('detects exhaustion after every eligible song is reserved', () => {
+    const history = songs.map(song => ({ songId: song.id, singerIds: ['A', 'B'] as [string, string], state: 'QUEUED' as const }));
+    expect(inspectAvailability({ ...base, sessionHistory: history })).toEqual({ eligibleSongs: 70, unusedSongs: 0, exhausted: true });
+  });
+
+  it('recycles only after explicit recycle activation', () => {
+    const history = songs.map(song => ({ songId: song.id, singerIds: ['A', 'B'] as [string, string], state: 'PLAYED' as const }));
+    expect(generateKaraokePlaylist({ ...base, sessionHistory: history })).toHaveLength(0);
+    expect(generateKaraokePlaylist({ ...base, sessionHistory: history, recycleMode: true })).toHaveLength(50);
+  });
+
+  it('makes songs normally available in a new session', () => {
+    const oldSession = songs.map(song => ({ songId: song.id, singerIds: ['A', 'B'] as [string, string], state: 'PLAYED' as const }));
+    expect(generateKaraokePlaylist({ ...base, sessionHistory: oldSession })).toHaveLength(0);
+    expect(generateKaraokePlaylist(base)).toHaveLength(50);
+  });
+
+  it('persists fairness statistics across batches', () => {
+    const first = generateKaraokePlaylist({ ...base, limit: 15 });
+    const firstStats = calculateSessionStats(members.map(member => member.id), toHistory(first));
+    const second = generateKaraokePlaylist({ ...base, sessionHistory: toHistory(first), limit: 15 });
+    const combined = calculateSessionStats(members.map(member => member.id), [...toHistory(first), ...toHistory(second)]);
+    expect(Object.values(combined.turnsByMember).reduce((a, b) => a + b, 0)).toBe(
+      Object.values(firstStats.turnsByMember).reduce((a, b) => a + b, 0) + second.length * 2,
+    );
+  });
+
+  it('excludes solo-only songs from the duet queue', () => {
+    const soloOnly = memberships.filter(item => item.song_id === 's01' && item.user_id === 'A');
+    expect(generateKaraokePlaylist({ ...base, memberSongs: soloOnly, allSongs: [songs[1]] })).toEqual([]);
+  });
+
+  it('ignores song knowledge belonging to absent group members', () => {
+    const result = generateKaraokePlaylist({ ...base, selectedMemberIds: ['A', 'B'] });
+    expect(result.every(item => item.eligibleSingerIds.every(id => ['A', 'B'].includes(id)))).toBe(true);
   });
 });

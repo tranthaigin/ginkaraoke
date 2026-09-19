@@ -11,9 +11,13 @@ node_modules
 dist
 dist-ssr
 *.local
+supabase/.temp/
 .env
 .env.*
 !.env.example
+master-prompt.md
+prompt.md
+*prompt*.txt
 
 # Editor directories and files
 .vscode/*

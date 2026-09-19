@@ -1,27 +1,30 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '../types/database';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const url = import.meta.env.VITE_SUPABASE_URL?.trim();
+const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
 
-export const isSupabaseConfigured = (): boolean => {
-  return Boolean(
-    supabaseUrl &&
-    supabaseAnonKey &&
-    supabaseUrl.startsWith('https://') &&
-    supabaseAnonKey.length > 20
-  );
-};
-
-export const supabase: SupabaseClient | null = isSupabaseConfigured()
-  ? createClient(supabaseUrl!, supabaseAnonKey!, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-      realtime: {
-        params: {
-          eventsPerSecond: 10,
-        },
-      },
-    })
+export const supabaseConfigError = !url || !publishableKey
+  ? 'Thiếu VITE_SUPABASE_URL hoặc VITE_SUPABASE_PUBLISHABLE_KEY. Hãy cấu hình .env.local.'
   : null;
+
+export const supabase: SupabaseClient<Database> | null = supabaseConfigError
+  ? null
+  : createClient<Database>(url!, publishableKey!, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+      },
+      realtime: { params: { eventsPerSecond: 10 } },
+    });
+
+export function requireSupabase(): SupabaseClient<Database> {
+  if (!supabase) throw new Error(supabaseConfigError ?? 'Supabase chưa được cấu hình.');
+  return supabase;
+}
+
+export function authRedirectUrl(): string {
+  return new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+}

@@ -31,6 +31,7 @@ export const ToastContainer: React.FC = () => {
               <span>{toast.text}</span>
             </div>
             <button
+              aria-label="Đóng thông báo"
               onClick={() => removeToast(toast.id)}
               style={{
                 background: 'transparent',

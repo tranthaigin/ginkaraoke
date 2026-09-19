@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { SongRepo, MemberSongRepo } from '../repositories';
 import { Priority, Song } from '../types';
-import { X, Star, Flame, Music, Plus } from 'lucide-react';
+import { X, Star, Flame, Music, Plus, Sparkles } from 'lucide-react';
 
 interface AddSongModalProps {
   isOpen: boolean;
@@ -11,7 +11,7 @@ interface AddSongModalProps {
 }
 
 export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const { currentMember, showToast } = useApp();
+  const { showToast, isOnline } = useApp();
 
   const [title, setTitle] = useState('');
   const [artist, setArtist] = useState('');
@@ -41,7 +41,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
     }
     const timer = setTimeout(async () => {
       try {
-        const list = await SongRepo.searchSongs(title.trim());
+        const list = await SongRepo.search(title.trim());
         setSuggestions(list.slice(0, 4));
       } catch {
         setSuggestions([]);
@@ -50,7 +50,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
     return () => clearTimeout(timer);
   }, [title]);
 
-  if (!isOpen || !currentMember) return null;
+  if (!isOpen) return null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -61,16 +61,15 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
 
     setIsSubmitting(true);
     try {
-      // 1. Create or retrieve normalized song
-      const song = await SongRepo.findOrCreateSong(title.trim(), artist.trim());
-      // 2. Add to current member's personal playlist
-      await MemberSongRepo.addSongToMember(currentMember.id, song.id, favorite, priority);
+      if (!isOnline) throw new Error('Bạn đang offline. Bài hát chưa được lưu.');
+      const song = await SongRepo.findOrCreate(title.trim(), artist.trim());
+      await MemberSongRepo.add(song.id, favorite, priority);
 
-      showToast(`Đã thêm bài "${song.title}" vào playlist của bạn!`, 'success');
+      showToast(`Đã thêm bài "${song.title}" vào playlist của bạn! 🎶`, 'success');
       onSuccess?.();
       onClose();
-    } catch (err: any) {
-      showToast(err.message || 'Không thể thêm bài hát', 'error');
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Không thể thêm bài hát', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -84,14 +83,23 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        {/* Header */}
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-song-title"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Modal Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '1.2rem' }}>⚡</span>
-            <h3 style={{ fontSize: '1.15rem' }}>Thêm nhanh bài hát</h3>
+            <span style={{ fontSize: '1.25rem' }}>✨</span>
+            <h3 id="add-song-title" style={{ fontSize: '1.2rem', fontFamily: 'var(--font-display)' }}>
+              Thêm bài vào playlist
+            </h3>
           </div>
           <button
+            aria-label="Đóng"
             onClick={onClose}
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
@@ -104,6 +112,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              transition: 'all 0.2s ease',
             }}
           >
             <X size={16} />
@@ -111,66 +120,73 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* Song Title */}
-          <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+          {/* Song Title Field */}
+          <div style={{ marginBottom: '14px' }}>
+            <label className="field-label" style={{ marginTop: 0 }}>
               TÊN BÀI HÁT *
             </label>
             <input
               ref={inputRef}
               type="text"
               className="input-text"
-              placeholder="VD: Nơi này có anh, Bạc phận..."
+              placeholder="VD: Nơi này có anh, Bạc phận, Em của ngày hôm qua..."
               value={title}
+              maxLength={200}
               onChange={e => setTitle(e.target.value)}
               disabled={isSubmitting}
             />
           </div>
 
-          {/* Quick suggestions if already in group */}
+          {/* Live suggestions */}
           {suggestions.length > 0 && (
-            <div style={{
-              background: 'rgba(15, 23, 42, 0.8)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '6px',
-              marginBottom: '12px',
-            }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--neon-cyan)', padding: '2px 6px', fontWeight: 600 }}>
-                Gợi ý bài có sẵn trong nhóm:
+            <div
+              style={{
+                background: 'rgba(11, 17, 32, 0.95)',
+                border: '1px solid rgba(0, 242, 254, 0.25)',
+                borderRadius: 'var(--radius-md)',
+                padding: '8px',
+                marginBottom: '14px',
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.4)',
+              }}
+            >
+              <div style={{ fontSize: '0.74rem', color: 'var(--neon-cyan)', padding: '2px 6px 6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Sparkles size={12} />
+                <span>Gợi ý bài đã có trong nhóm:</span>
               </div>
               {suggestions.map(s => (
                 <div
                   key={s.id}
                   onClick={() => handleSelectSuggestion(s)}
+                  className="glass-card-interactive"
                   style={{
-                    padding: '6px 8px',
+                    padding: '8px 10px',
                     borderRadius: 'var(--radius-sm)',
                     cursor: 'pointer',
-                    fontSize: '0.85rem',
+                    fontSize: '0.86rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
+                    marginBottom: '4px',
                   }}
-                  className="glass-card-interactive"
                 >
-                  <span style={{ fontWeight: 600, color: '#f8fafc' }}>{s.title}</span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.artist}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{s.title}</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{s.artist}</span>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Artist */}
+          {/* Artist Field */}
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+            <label className="field-label" style={{ marginTop: 0 }}>
               CA SĨ / NGHỆ SĨ (TÙY CHỌN)
             </label>
             <input
               type="text"
               className="input-text"
-              placeholder="VD: Sơn Tùng M-TP, Jack..."
+              placeholder="VD: Sơn Tùng M-TP, Jack, Vũ..."
               value={artist}
+              maxLength={200}
               onChange={e => setArtist(e.target.value)}
               disabled={isSubmitting}
             />
@@ -178,81 +194,46 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
 
           {/* Priority Selection */}
           <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              MỨC ĐỘ ƯU TIÊN
+            <label className="field-label" style={{ marginTop: 0 }}>
+              MỨC ĐỘ ƯU TIÊN HÁT
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+            <div className="priority-grid">
               <button
                 type="button"
+                className={priority === 'NORMAL' ? 'active' : ''}
                 onClick={() => setPriority('NORMAL')}
-                style={{
-                  padding: '10px 6px',
-                  borderRadius: 'var(--radius-md)',
-                  background: priority === 'NORMAL' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                  border: priority === 'NORMAL' ? '1px solid #94a3b8' : '1px solid var(--border-subtle)',
-                  color: priority === 'NORMAL' ? '#ffffff' : 'var(--text-muted)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
               >
                 Biết hát
               </button>
 
               <button
                 type="button"
+                className={`cyan ${priority === 'WANT_TO_SING' ? 'active' : ''}`}
                 onClick={() => setPriority('WANT_TO_SING')}
-                style={{
-                  padding: '10px 6px',
-                  borderRadius: 'var(--radius-md)',
-                  background: priority === 'WANT_TO_SING' ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  border: priority === 'WANT_TO_SING' ? '1px solid var(--neon-cyan)' : '1px solid var(--border-subtle)',
-                  color: priority === 'WANT_TO_SING' ? 'var(--neon-cyan)' : 'var(--text-muted)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
               >
-                <Music size={13} />
-                Muốn hát
+                <Music size={14} />
+                <span>Muốn hát</span>
               </button>
 
               <button
                 type="button"
+                className={`rose ${priority === 'HIGH' ? 'active' : ''}`}
                 onClick={() => setPriority('HIGH')}
-                style={{
-                  padding: '10px 6px',
-                  borderRadius: 'var(--radius-md)',
-                  background: priority === 'HIGH' ? 'rgba(244, 63, 94, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                  border: priority === 'HIGH' ? '1px solid var(--neon-rose)' : '1px solid var(--border-subtle)',
-                  color: priority === 'HIGH' ? '#fb7185' : 'var(--text-muted)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
               >
-                <Flame size={13} />
-                Bài tủ 🔥
+                <Flame size={14} />
+                <span>Bài tủ 🔥</span>
               </button>
             </div>
           </div>
 
-          {/* Favorite Toggle */}
-          <div style={{ marginBottom: '20px' }}>
+          {/* Favorite Toggle Button */}
+          <div style={{ marginBottom: '22px' }}>
             <button
               type="button"
               onClick={() => setFavorite(v => !v)}
               style={{
                 width: '100%',
-                padding: '10px 14px',
+                padding: '11px 16px',
                 borderRadius: 'var(--radius-md)',
                 background: favorite ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.04)',
                 border: favorite ? '1px solid var(--neon-amber)' : '1px solid var(--border-subtle)',
@@ -264,10 +245,11 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
                 justifyContent: 'center',
                 gap: '8px',
                 cursor: 'pointer',
+                transition: 'all 0.2s ease',
               }}
             >
-              <Star size={16} fill={favorite ? '#fbbf24' : 'none'} />
-              <span>{favorite ? 'Đã đánh dấu Thích ⭐' : 'Thêm vào danh sách Thích ⭐'}</span>
+              <Star size={17} fill={favorite ? '#fbbf24' : 'none'} />
+              <span>{favorite ? 'Đã thêm vào danh sách Yêu thích ⭐' : 'Đánh dấu bài Yêu thích ⭐'}</span>
             </button>
           </div>
 
@@ -275,11 +257,17 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
           <button
             type="submit"
             className="btn-primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !title.trim()}
             style={{ width: '100%' }}
           >
-            <Plus size={18} />
-            <span>{isSubmitting ? 'Đang lưu...' : 'Lưu bài ngay'}</span>
+            {isSubmitting ? (
+              <span>Đang lưu bài…</span>
+            ) : (
+              <>
+                <Plus size={18} />
+                <span>Lưu bài vào Playlist</span>
+              </>
+            )}
           </button>
         </form>
       </div>
