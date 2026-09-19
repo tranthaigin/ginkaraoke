@@ -97,7 +97,7 @@ export function PrivacyPage() {
             <li>nhóm, mã tham gia nhóm, vai trò và quan hệ thành viên;</li>
             <li>danh sách bài hát, nghệ sĩ, trạng thái yêu thích và mức ưu tiên của bạn;</li>
             <li>phiên karaoke, người tham dự, các lượt đề xuất và hàng đợi bài hát;</li>
-            <li>cặp ca sĩ được đề xuất, trạng thái đã hát/chờ hát và thống kê phiên hát.</li>
+            <li>người hoặc cặp ca sĩ được chọn, chế độ lấy bài, trạng thái đã hát/chờ hát và thống kê phiên hát.</li>
           </ul>
           <p>
             Trình duyệt lưu phiên đăng nhập do Supabase quản lý và mã nhóm bạn chọn gần nhất để khôi
@@ -116,7 +116,7 @@ export function PrivacyPage() {
             <li>xác thực tài khoản, duy trì phiên đăng nhập và bảo vệ quyền truy cập;</li>
             <li>hiển thị hồ sơ của bạn trong các nhóm mà bạn tham gia;</li>
             <li>quản lý playlist cá nhân, nhóm và lịch sử karaoke;</li>
-            <li>tìm các bài hát chung và tạo cặp song ca hợp lệ, công bằng;</li>
+            <li>tìm bài hát chung và tạo cặp hợp lệ, hoặc bốc bài ngẫu nhiên khi bạn chọn chế độ này;</li>
             <li>đồng bộ thay đổi giữa các thành viên và thiết bị trong cùng phiên hát.</li>
           </ul>
           <p>GinKaraoke không bán dữ liệu cá nhân và không sử dụng dữ liệu để phân phối quảng cáo.</p>
@@ -146,7 +146,7 @@ export function PrivacyPage() {
           <p>
             Các thành viên trong cùng nhóm có thể xem tên, ảnh đại diện, các bài hát liên quan đến
             hoạt động chung, danh sách người tham dự, hàng đợi và lịch sử phiên karaoke. Điều này cần
-            thiết để tìm bài chung và phân công cặp song ca. Người không thuộc nhóm không được cấp quyền
+            thiết để tìm hoặc bốc bài và phân công người hát. Người không thuộc nhóm không được cấp quyền
             đọc dữ liệu nhóm qua chính sách truy cập của cơ sở dữ liệu.
           </p>
           <p>

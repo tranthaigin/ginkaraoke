@@ -184,7 +184,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({ isOpen, onClose, onS
             <input
               type="text"
               className="input-text"
-              placeholder="VD: Sơn Tùng M-TP, Jack, Vũ..."
+              placeholder="VD: Sơn Tùng M-TP, Vũ..."
               value={artist}
               maxLength={200}
               onChange={e => setArtist(e.target.value)}

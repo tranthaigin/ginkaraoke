@@ -32,6 +32,7 @@ interface AppContextValue {
   joinGroup: (code: string) => Promise<void>;
   selectGroup: (group: Group) => Promise<void>;
   removeMember: (userId: string) => Promise<void>;
+  dissolveGroup: () => Promise<void>;
   refresh: () => Promise<void>;
   refreshMembers: () => Promise<void>;
 }
@@ -76,6 +77,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const selected = nextGroups.find(group => group.id === savedId) ?? nextGroups[0] ?? null;
       setCurrentGroup(selected);
       setMembers(selected ? await GroupRepo.getMembers(selected.id) : []);
+      if (selected) localStorage.setItem(GROUP_KEY, selected.id);
+      else localStorage.removeItem(GROUP_KEY);
       setAuthError(null);
       setAuthStatus('ready');
     } catch (error) {
@@ -174,9 +177,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [showToast]);
 
   const selectGroup = useCallback(async (group: Group) => {
+    const nextMembers = await GroupRepo.getMembers(group.id);
     setCurrentGroup(group);
     localStorage.setItem(GROUP_KEY, group.id);
-    setMembers(await GroupRepo.getMembers(group.id));
+    setMembers(nextMembers);
   }, []);
 
   const createGroup = useCallback(async (name: string, code?: string) => {
@@ -206,13 +210,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     else await refreshMembers();
   }, [currentGroup, refresh, refreshMembers, user]);
 
+  const dissolveGroup = useCallback(async () => {
+    if (!currentGroup) return;
+    const dissolvedName = currentGroup.name;
+    setIsBusy(true);
+    try {
+      await GroupRepo.dissolve(currentGroup.id);
+      const nextGroups = await GroupRepo.listMine();
+      const nextGroup = nextGroups[0] ?? null;
+      const nextMembers = nextGroup ? await GroupRepo.getMembers(nextGroup.id) : [];
+      setGroups(nextGroups);
+      setCurrentGroup(nextGroup);
+      setMembers(nextMembers);
+      if (nextGroup) localStorage.setItem(GROUP_KEY, nextGroup.id);
+      else localStorage.removeItem(GROUP_KEY);
+      showToast(`Đã giải tán nhóm “${dissolvedName}”.`, 'success');
+    } finally {
+      setIsBusy(false);
+    }
+  }, [currentGroup, showToast]);
+
   const value = useMemo<AppContextValue>(() => ({
     authStatus, authError, user, profile, groups, currentGroup, members, isOnline, isBusy, toasts,
     showToast, removeToast, signInWithGoogle, signOut, saveProfile, createGroup, joinGroup,
-    selectGroup, removeMember, refresh, refreshMembers,
+    selectGroup, removeMember, dissolveGroup, refresh, refreshMembers,
   }), [authStatus, authError, user, profile, groups, currentGroup, members, isOnline, isBusy, toasts,
     showToast, removeToast, signInWithGoogle, signOut, saveProfile, createGroup, joinGroup,
-    selectGroup, removeMember, refresh, refreshMembers]);
+    selectGroup, removeMember, dissolveGroup, refresh, refreshMembers]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

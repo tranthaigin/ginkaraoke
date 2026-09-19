@@ -9,6 +9,7 @@ import {
   Mic,
   Plus,
   RefreshCw,
+  Shuffle,
   Sparkles,
   Trash2,
   Undo2,
@@ -17,8 +18,14 @@ import {
 import { useApp } from '../context/AppContext';
 import { MemberSongRepo, SessionRepo, SongRepo } from '../repositories';
 import type { Availability } from '../services/recommendation/engine';
-import { calculateSessionStats, generateKaraokePlaylist, inspectAvailability } from '../services/recommendation/engine';
-import type { KaraokeSession, Profile, QueueHistoryItem, SessionSong } from '../types';
+import {
+  calculateSessionStats,
+  generateKaraokePlaylist,
+  generateRandomPlaylist,
+  inspectAvailability,
+  inspectRandomAvailability,
+} from '../services/recommendation/engine';
+import type { KaraokeSession, Profile, QueueHistoryItem, SelectionMode, SessionSong } from '../types';
 import { supabase } from '../services/supabase';
 import { SingerPair } from '../components/SingerPair';
 import { MemberAvatar } from '../components/MemberAvatar';
@@ -35,14 +42,22 @@ interface RoomData {
 const defaultName = () => `Karaoke ${new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`;
 
 export function KaraokePage() {
-  const { currentGroup, members, isOnline, showToast } = useApp();
+  const { groups, currentGroup, members, isOnline, showToast, selectGroup } = useApp();
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const selectedGroup = useMemo(
+    () => groups.find(group => group.id === selectedGroupId) ?? null,
+    [groups, selectedGroupId]
+  );
   const profiles = useMemo(
-    () => members.map(item => item.profile).filter((item): item is Profile => Boolean(item)),
-    [members]
+    () => currentGroup?.id === selectedGroupId
+      ? members.map(item => item.profile).filter((item): item is Profile => Boolean(item))
+      : [],
+    [currentGroup?.id, members, selectedGroupId]
   );
 
   const [selected, setSelected] = useState<string[]>([]);
   const [sessionName, setSessionName] = useState(defaultName);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>('SMART');
   const [room, setRoom] = useState<RoomData | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,7 +65,7 @@ export function KaraokePage() {
   const [confirmRecycle, setConfirmRecycle] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(false);
   const [inspectionSong, setInspectionSong] = useState<SessionSong | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const historyOf = (songs: SessionSong[]): QueueHistoryItem[] =>
     songs
@@ -64,22 +79,23 @@ export function KaraokePage() {
 
   const calculateAvailability = useCallback(
     async (data: RoomData) => {
-      if (!currentGroup) return;
+      if (!selectedGroup) return;
       const [memberSongs, songs] = await Promise.all([
-        MemberSongRepo.getForGroup(currentGroup.id),
+        MemberSongRepo.getForGroup(selectedGroup.id),
         SongRepo.getAll(),
       ]);
-      setAvailability(
-        inspectAvailability({
+      const input = {
           selectedMemberIds: data.members.map(member => member.id),
           members: data.members,
           memberSongs,
           allSongs: songs,
           sessionHistory: historyOf(data.songs),
-        })
-      );
+        };
+      setAvailability(data.session.selection_mode === 'RANDOM'
+        ? inspectRandomAvailability(input)
+        : inspectAvailability(input));
     },
-    [currentGroup]
+    [selectedGroup]
   );
 
   const loadRoom = useCallback(
@@ -94,10 +110,10 @@ export function KaraokePage() {
   );
 
   const loadActive = useCallback(async () => {
-    if (!currentGroup) return;
+    if (!selectedGroup || currentGroup?.id !== selectedGroup.id) return;
     setLoading(true);
     try {
-      const active = await SessionRepo.getActive(currentGroup.id);
+      const active = await SessionRepo.getActive(selectedGroup.id);
       if (active) {
         await loadRoom(active);
       } else {
@@ -109,11 +125,31 @@ export function KaraokePage() {
     } finally {
       setLoading(false);
     }
-  }, [currentGroup, loadRoom, profiles, showToast]);
+  }, [currentGroup?.id, loadRoom, profiles, selectedGroup, showToast]);
 
   useEffect(() => {
-    void loadActive();
-  }, [loadActive]);
+    if (selectedGroup && currentGroup?.id === selectedGroup.id) void loadActive();
+  }, [currentGroup?.id, loadActive, selectedGroup]);
+
+  const chooseGroup = async (groupId: string) => {
+    const group = groups.find(item => item.id === groupId);
+    setSelectedGroupId(groupId);
+    setRoom(null);
+    setAvailability(null);
+    setSelected([]);
+    if (!group) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      await selectGroup(group);
+    } catch (error) {
+      setSelectedGroupId('');
+      setLoading(false);
+      showToast(error instanceof Error ? error.message : 'Không thể tải nhóm đã chọn.', 'error');
+    }
+  };
 
   // Realtime Supabase Subscription
   useEffect(() => {
@@ -143,14 +179,19 @@ export function KaraokePage() {
     };
   }, [loadRoom, room?.session.id, showToast]);
 
-  const computeRecommendations = async (participantIds: string[], existing: SessionSong[], recycleMode: boolean) => {
-    if (!currentGroup) return [];
+  const computeRecommendations = async (
+    participantIds: string[],
+    existing: SessionSong[],
+    recycleMode: boolean,
+    mode: SelectionMode,
+  ) => {
+    if (!selectedGroup) return [];
     const [memberSongs, songs, recent] = await Promise.all([
-      MemberSongRepo.getForGroup(currentGroup.id),
+      MemberSongRepo.getForGroup(selectedGroup.id),
       SongRepo.getAll(),
-      SessionRepo.recentPlayed(currentGroup.id),
+      SessionRepo.recentPlayed(selectedGroup.id),
     ]);
-    return generateKaraokePlaylist({
+    const input = {
       selectedMemberIds: participantIds,
       members: profiles,
       memberSongs,
@@ -158,12 +199,17 @@ export function KaraokePage() {
       sessionHistory: historyOf(existing),
       recentlySungSongIds: recent,
       recycleMode,
-    });
+    };
+    return mode === 'RANDOM' ? generateRandomPlaylist(input) : generateKaraokePlaylist(input);
   };
 
   const createRoom = async () => {
-    if (!currentGroup || selected.length < 2) {
-      showToast('Chọn ít nhất 2 bạn để tạo hàng đợi song ca.', 'warning');
+    if (!selectedGroup || currentGroup?.id !== selectedGroup.id) {
+      showToast('Hãy chọn nhóm karaoke trước.', 'warning');
+      return;
+    }
+    if (selected.length < 2) {
+      showToast('Chọn ít nhất 2 bạn để tạo phòng karaoke.', 'warning');
       return;
     }
     if (!isOnline) {
@@ -172,14 +218,18 @@ export function KaraokePage() {
     }
     setBusy(true);
     try {
-      const recommendations = await computeRecommendations(selected, [], false);
+      const recommendations = await computeRecommendations(selected, [], false, selectionMode);
       if (!recommendations.length) {
-        throw new Error('Chưa có bài nào được ít nhất 2 người tham dự cùng biết hát. Hãy thêm bài vào playlist!');
+        throw new Error(selectionMode === 'RANDOM'
+          ? 'Những thành viên đã chọn chưa có bài hát nào trong playlist.'
+          : 'Chưa có bài nào được ít nhất 2 người tham dự cùng biết hát. Hãy thêm bài vào playlist!');
       }
-      const session = await SessionRepo.create(currentGroup.id, sessionName.trim() || defaultName(), selected);
-      await SessionRepo.addBatch(session.id, recommendations, false);
+      const session = await SessionRepo.create(selectedGroup.id, sessionName.trim() || defaultName(), selected, selectionMode);
+      await SessionRepo.addBatch(session.id, recommendations, false, selectionMode);
       await loadRoom(session);
-      showToast(`Đã tạo ${recommendations.length} bài song ca cho cả nhóm! 🎤`, 'success');
+      showToast(selectionMode === 'RANDOM'
+        ? `Đã chọn ngẫu nhiên ${recommendations.length} bài từ playlist! 🎲`
+        : `Đã tạo ${recommendations.length} bài song ca cho cả nhóm! 🎤`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Không thể tạo buổi hát.', 'error');
     } finally {
@@ -197,17 +247,20 @@ export function KaraokePage() {
       const result = await computeRecommendations(
         room.members.map(member => member.id),
         room.songs,
-        recycleMode
+        recycleMode,
+        room.session.selection_mode,
       );
       if (!result.length) {
         if (availability?.exhausted && !recycleMode) {
           setConfirmRecycle(true);
         } else {
-          showToast('Không còn bài song ca phù hợp để tạo lượt mới.', 'warning');
+          showToast(room.session.selection_mode === 'RANDOM'
+            ? 'Không còn bài nào trong các playlist đã chọn.'
+            : 'Không còn bài song ca phù hợp để tạo lượt mới.', 'warning');
         }
         return;
       }
-      await SessionRepo.addBatch(room.session.id, result, recycleMode);
+      await SessionRepo.addBatch(room.session.id, result, recycleMode, room.session.selection_mode);
       await loadRoom(room.session);
       setConfirmRecycle(false);
       showToast(`${recycleMode ? 'Đã dùng lại' : 'Đã thêm'} ${result.length} bài vào hàng đợi!`, 'success');
@@ -268,20 +321,72 @@ export function KaraokePage() {
               </span>
               <h1 style={{ fontSize: '1.85rem', marginTop: '4px' }}>Hôm nay ai đi hát?</h1>
               <p className="muted" style={{ fontSize: '0.88rem', marginTop: '4px' }}>
-                Chọn thành viên tham gia để thuật toán tìm bài trùng và phân cặp song ca công bằng.
+                Chọn nhóm trước, sau đó chọn thành viên và cách lấy bài cho buổi hát.
               </p>
             </section>
+
+            {/* Group must be selected explicitly before members are available. */}
+            <section className="glass-card" style={{ padding: '16px 20px' }}>
+              <label className="field-label" htmlFor="karaoke-group" style={{ marginTop: 0 }}>
+                1. CHỌN NHÓM KARAOKE
+              </label>
+              <select
+                id="karaoke-group"
+                className="input-text karaoke-group-select"
+                value={selectedGroupId}
+                onChange={event => void chooseGroup(event.target.value)}
+              >
+                <option value="">-- Chọn một nhóm của bạn --</option>
+                {groups.map(group => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
+                ))}
+              </select>
+              <p className="field-help">
+                Danh sách thành viên và playlist chỉ được lấy từ nhóm bạn chọn.
+              </p>
+            </section>
+
+            {selectedGroup && (
+              <section className="glass-card" style={{ padding: '16px 20px' }}>
+                <div className="field-label" style={{ marginTop: 0 }}>2. CÁCH CHỌN BÀI</div>
+                <div className="selection-mode-grid">
+                  <button
+                    type="button"
+                    className={`selection-mode-card ${selectionMode === 'SMART' ? 'is-active' : ''}`}
+                    onClick={() => setSelectionMode('SMART')}
+                  >
+                    <Sparkles size={20} />
+                    <span>
+                      <strong>Thông minh</strong>
+                      <small>Tìm bài chung, ưu tiên bài tủ và chia cặp công bằng.</small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`selection-mode-card ${selectionMode === 'RANDOM' ? 'is-active is-random' : ''}`}
+                    onClick={() => setSelectionMode('RANDOM')}
+                  >
+                    <Shuffle size={20} />
+                    <span>
+                      <strong>Ngẫu nhiên thuần túy</strong>
+                      <small>Lấy ngẫu nhiên từ các playlist đã chọn, không chấm điểm hay đòi bài trùng.</small>
+                    </span>
+                  </button>
+                </div>
+              </section>
+            )}
 
             {/* Session Name Field */}
             <div className="glass-card" style={{ padding: '16px 20px' }}>
               <label className="field-label" htmlFor="session-name" style={{ marginTop: 0 }}>
-                TÊN BUỔI HÁT
+                3. TÊN BUỔI HÁT
               </label>
               <input
                 id="session-name"
                 className="input-text"
                 value={sessionName}
                 maxLength={120}
+                disabled={!selectedGroup}
                 onChange={event => setSessionName(event.target.value)}
                 placeholder="VD: Karaoke cuối tuần, Quẩy sinh nhật..."
               />
@@ -299,6 +404,7 @@ export function KaraokePage() {
                 <button
                   className="text-button"
                   style={{ fontSize: '0.82rem' }}
+                  disabled={!selectedGroup}
                   onClick={() =>
                     setSelected(selected.length === profiles.length ? [] : profiles.map(profile => profile.id))
                   }
@@ -307,7 +413,12 @@ export function KaraokePage() {
                 </button>
               </div>
 
-              <div className="adaptive-grid-2col">
+              {!selectedGroup ? (
+                <div className="karaoke-group-required">
+                  <Users size={24} />
+                  <span>Chọn nhóm ở bước 1 để xem và chọn thành viên.</span>
+                </div>
+              ) : <div className="adaptive-grid-2col">
                 {profiles.map(profile => {
                   const isSelected = selected.includes(profile.id);
                   return (
@@ -369,21 +480,21 @@ export function KaraokePage() {
                     </button>
                   );
                 })}
-              </div>
+              </div>}
             </section>
 
             {/* Mobile-only CTA */}
             <div className="mobile-only-block" style={{ marginTop: '8px' }}>
               <button
                 className="btn-primary"
-                disabled={busy || selected.length < 2}
+                disabled={busy || !selectedGroup || selected.length < 2}
                 onClick={() => void createRoom()}
                 style={{ width: '100%', minHeight: '52px', fontSize: '1.05rem' }}
               >
                 {busy ? (
                   <>
                     <EqualizerIcon size="sm" animated={true} />
-                    <span>Đang phân tích và chia cặp song ca…</span>
+                    <span>{selectionMode === 'RANDOM' ? 'Đang bốc bài ngẫu nhiên…' : 'Đang phân tích và chia cặp song ca…'}</span>
                   </>
                 ) : (
                   <>
@@ -393,16 +504,16 @@ export function KaraokePage() {
                 )}
               </button>
 
-              {selected.length < 2 && (
+              {selectedGroup && selected.length < 2 && (
                 <p style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--neon-amber)', marginTop: '8px' }}>
-                  * Vui lòng chọn tối thiểu 2 người để ghép cặp song ca.
+                  * Vui lòng chọn tối thiểu 2 người để tạo phòng karaoke.
                 </p>
               )}
             </div>
           </div>
 
           {/* Right Summary Panel (Desktop >=1024px) */}
-          <aside className="adaptive-sidebar-col desktop-only-block">
+          {selectedGroup && <aside className="adaptive-sidebar-col desktop-only-block">
             <div className="glass-card" style={{ padding: '24px' }}>
               <span className="eyebrow" style={{ marginBottom: '8px' }}>
                 <Sparkles size={12} /> TỔNG KẾT BUỔI HÁT
@@ -411,7 +522,7 @@ export function KaraokePage() {
                 {sessionName || 'Buổi hát mới'}
               </h3>
               <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: '18px' }}>
-                Nhóm: <strong>{currentGroup?.name}</strong>
+                Nhóm: <strong>{selectedGroup?.name}</strong>
               </p>
 
               <div style={{ borderTop: '1px solid var(--border-subtle)', borderBottom: '1px solid var(--border-subtle)', padding: '16px 0', marginBottom: '20px' }}>
@@ -447,25 +558,27 @@ export function KaraokePage() {
 
                 {selected.length < 2 ? (
                   <p style={{ fontSize: '0.78rem', color: 'var(--neon-amber)' }}>
-                    ⚠️ Cần chọn tối thiểu 2 người để ghép cặp song ca.
+                    ⚠️ Cần chọn tối thiểu 2 người để tạo phòng karaoke.
                   </p>
                 ) : (
                   <p style={{ fontSize: '0.78rem', color: 'var(--emerald-400)' }}>
-                    ✓ Đủ điều kiện tạo phòng và tạo playlist thông minh.
+                    {selectionMode === 'RANDOM'
+                      ? '✓ Đủ điều kiện bốc bài từ các playlist đã chọn.'
+                      : '✓ Đủ điều kiện tạo phòng và playlist thông minh.'}
                   </p>
                 )}
               </div>
 
               <button
                 className="btn-primary"
-                disabled={busy || selected.length < 2}
+                disabled={busy || !selectedGroup || selected.length < 2}
                 onClick={() => void createRoom()}
                 style={{ width: '100%', minHeight: '52px', fontSize: '1.05rem' }}
               >
                 {busy ? (
                   <>
                     <EqualizerIcon size="sm" animated={true} />
-                    <span>Đang phân tích và chia cặp…</span>
+                    <span>{selectionMode === 'RANDOM' ? 'Đang bốc bài ngẫu nhiên…' : 'Đang phân tích và chia cặp…'}</span>
                   </>
                 ) : (
                   <>
@@ -475,7 +588,7 @@ export function KaraokePage() {
                 )}
               </button>
             </div>
-          </aside>
+          </aside>}
         </div>
       </div>
     );
@@ -486,6 +599,12 @@ export function KaraokePage() {
   // =========================================================
   const nameById = new Map(room.members.map(member => [member.id, member.display_name]));
   const profileById = new Map(room.members.map(member => [member.id, member]));
+  const secondSingerProfile = (id: string | null) => id ? profileById.get(id) : undefined;
+  const secondSingerName = (id: string | null) => id ? nameById.get(id) : undefined;
+  const performerNames = (song: SessionSong) => song.singer_2_id
+    ? `${nameById.get(song.singer_1_id)} + ${nameById.get(song.singer_2_id)}`
+    : `${nameById.get(song.singer_1_id)} · Solo`;
+  const isRandomRoom = room.session.selection_mode === 'RANDOM';
 
   const queued = room.songs
     .filter(song => song.state === 'QUEUED')
@@ -527,8 +646,16 @@ export function KaraokePage() {
             />
             <span>ĐANG HÁT TRỰC TIẾP</span>
           </span>
+          {isRandomRoom && (
+            <span className="badge badge-amber" style={{ marginBottom: '6px', marginLeft: '6px' }}>
+              <Shuffle size={11} /> NGẪU NHIÊN
+            </span>
+          )}
 
           <h1 style={{ fontSize: '1.45rem', marginTop: '2px' }}>{room.session.name}</h1>
+          <p style={{ fontSize: '0.76rem', color: 'var(--cyan-400)', marginTop: '3px', fontWeight: 700 }}>
+            Nhóm: {selectedGroup?.name}
+          </p>
 
           {/* Participant Avatars & Names */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
@@ -580,7 +707,7 @@ export function KaraokePage() {
               </div>
               <div>
                 <strong>{Object.keys(stats.pairCounts).length}</strong>
-                <span>Cặp đã hát</span>
+                <span>{isRandomRoom ? 'Cặp / solo' : 'Cặp đã hát'}</span>
               </div>
             </div>
 
@@ -639,14 +766,14 @@ export function KaraokePage() {
             }}
           >
             <div style={{ fontSize: '0.72rem', color: 'var(--cyan-400)', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '8px' }}>
-              CẶP SONG CA ĐƯỢC PHÂN CÔNG:
+              {spotlightSong.singer_2_id ? 'CẶP SONG CA ĐƯỢC PHÂN CÔNG:' : 'CA SĨ SOLO ĐƯỢC CHỌN:'}
             </div>
 
             <SingerPair
               singer1={profileById.get(spotlightSong.singer_1_id)}
-              singer2={profileById.get(spotlightSong.singer_2_id)}
+              singer2={secondSingerProfile(spotlightSong.singer_2_id)}
               singer1Name={nameById.get(spotlightSong.singer_1_id)}
-              singer2Name={nameById.get(spotlightSong.singer_2_id)}
+              singer2Name={secondSingerName(spotlightSong.singer_2_id)}
               isSpotlight={true}
             />
 
@@ -729,7 +856,7 @@ export function KaraokePage() {
               style={{ fontSize: '0.82rem' }}
             >
               <Plus size={16} />
-              <span>Thêm bài (+50)</span>
+              <span>{isRandomRoom ? 'Bốc thêm (+50)' : 'Thêm bài (+50)'}</span>
             </button>
           </div>
 
@@ -766,9 +893,9 @@ export function KaraokePage() {
                   <div style={{ flexShrink: 0 }}>
                     <SingerPair
                       singer1={profileById.get(song.singer_1_id)}
-                      singer2={profileById.get(song.singer_2_id)}
+                      singer2={secondSingerProfile(song.singer_2_id)}
                       singer1Name={nameById.get(song.singer_1_id)}
-                      singer2Name={nameById.get(song.singer_2_id)}
+                      singer2Name={secondSingerName(song.singer_2_id)}
                       size="sm"
                     />
                   </div>
@@ -849,12 +976,12 @@ export function KaraokePage() {
             {busy ? (
               <>
                 <EqualizerIcon size="sm" animated={true} />
-                <span>Đang phân tích và thêm bài…</span>
+                <span>{isRandomRoom ? 'Đang bốc thêm bài…' : 'Đang phân tích và thêm bài…'}</span>
               </>
             ) : (
               <>
                 <Plus size={18} />
-                <span>Tạo thêm lượt gợi ý (+50 bài)</span>
+                <span>{isRandomRoom ? 'Bốc thêm ngẫu nhiên (+50 bài)' : 'Tạo thêm lượt gợi ý (+50 bài)'}</span>
               </>
             )}
           </button>
@@ -916,7 +1043,7 @@ export function KaraokePage() {
                       {song.song?.title}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {nameById.get(song.singer_1_id)} + {nameById.get(song.singer_2_id)}
+                      {performerNames(song)}
                       {song.played_at && (
                         <span>
                           {' · '}
@@ -973,7 +1100,7 @@ export function KaraokePage() {
               </div>
               <div>
                 <strong>{Object.keys(stats.pairCounts).length}</strong>
-                <span>Cặp đã hát</span>
+                <span>{isRandomRoom ? 'Cặp / solo' : 'Cặp đã hát'}</span>
               </div>
             </div>
           </div>
@@ -994,9 +1121,9 @@ export function KaraokePage() {
                   </div>
                   <SingerPair
                     singer1={profileById.get(spotlightSong.singer_1_id)}
-                    singer2={profileById.get(spotlightSong.singer_2_id)}
+                    singer2={secondSingerProfile(spotlightSong.singer_2_id)}
                     singer1Name={nameById.get(spotlightSong.singer_1_id)}
-                    singer2Name={nameById.get(spotlightSong.singer_2_id)}
+                    singer2Name={secondSingerName(spotlightSong.singer_2_id)}
                     size="sm"
                   />
                 </div>
@@ -1012,9 +1139,9 @@ export function KaraokePage() {
                   </div>
                   <SingerPair
                     singer1={profileById.get(subsequentQueue[0].singer_1_id)}
-                    singer2={profileById.get(subsequentQueue[0].singer_2_id)}
+                    singer2={secondSingerProfile(subsequentQueue[0].singer_2_id)}
                     singer1Name={nameById.get(subsequentQueue[0].singer_1_id)}
-                    singer2Name={nameById.get(subsequentQueue[0].singer_2_id)}
+                    singer2Name={secondSingerName(subsequentQueue[0].singer_2_id)}
                     size="sm"
                   />
                 </div>
@@ -1071,7 +1198,7 @@ export function KaraokePage() {
                 style={{ width: '100%', justifyContent: 'flex-start', padding: '9px 14px', fontSize: '0.84rem' }}
               >
                 <Plus size={15} color="var(--neon-cyan)" />
-                <span>Thêm 50 bài vào hàng chờ</span>
+                <span>{isRandomRoom ? 'Bốc ngẫu nhiên thêm 50 bài' : 'Thêm 50 bài vào hàng chờ'}</span>
               </button>
 
               <button
@@ -1110,7 +1237,9 @@ export function KaraokePage() {
       <ConfirmDialog
         isOpen={confirmRecycle}
         title="Không còn bài hát mới"
-        description="Buổi hát này đã dùng hết tất cả các bài hát song ca chung của những người tham dự. Bạn có muốn tạo lượt tiếp bằng cách dùng lại các bài trước đó không?"
+        description={isRandomRoom
+          ? 'Buổi hát này đã dùng hết các bài trong playlist của những người tham dự. Bạn có muốn bốc ngẫu nhiên lại các bài trước đó không?'
+          : 'Buổi hát này đã dùng hết tất cả các bài hát song ca chung của những người tham dự. Bạn có muốn tạo lượt tiếp bằng cách dùng lại các bài trước đó không?'}
         confirmLabel="Dùng lại bài trước"
         cancelLabel="Hủy"
         variant="warning"
@@ -1122,7 +1251,7 @@ export function KaraokePage() {
       <ConfirmDialog
         isOpen={confirmComplete}
         title="Kết thúc buổi hát?"
-        description="Toàn bộ danh sách bài đã hát, cặp song ca và lượt hát sẽ được lưu lại vào Lịch sử buổi hát để bạn xem lại sau."
+        description="Toàn bộ danh sách bài, người thể hiện và lượt hát sẽ được lưu lại vào Lịch sử buổi hát để bạn xem lại sau."
         confirmLabel="Kết thúc & Lưu"
         cancelLabel="Tiếp tục hát"
         variant="danger"
@@ -1149,7 +1278,7 @@ export function KaraokePage() {
 
             <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div>
-                <strong>Cặp song ca:</strong> {nameById.get(inspectionSong.singer_1_id)} + {nameById.get(inspectionSong.singer_2_id)}
+                <strong>{inspectionSong.singer_2_id ? 'Cặp song ca:' : 'Ca sĩ solo:'}</strong> {performerNames(inspectionSong)}
               </div>
               <div>
                 <strong>Người cùng biết hát:</strong>{' '}

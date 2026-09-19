@@ -93,6 +93,17 @@ export const groupRepository: IGroupRepository = {
     });
     if (error) throw new Error(message(error, 'Không thể rời hoặc xóa thành viên.'));
   },
+  async dissolve(groupId) {
+    const { error } = await requireSupabase().rpc('dissolve_group', {
+      target_group: groupId,
+    });
+    if (error) {
+      if (error.message.includes('Only the group owner')) {
+        throw new Error('Chỉ chủ nhóm mới có thể giải tán nhóm.');
+      }
+      throw new Error(message(error, 'Không thể giải tán nhóm.'));
+    }
+  },
 };
 
 export const songRepository: ISongRepository = {
@@ -188,9 +199,9 @@ export const sessionRepository: ISessionRepository = {
     if (error) throw new Error(message(error, 'Không thể tải phòng hát.'));
     return data as KaraokeSession | null;
   },
-  async create(groupId, name, participantIds) {
+  async create(groupId, name, participantIds, selectionMode) {
     const userId = await currentUserId();
-    if (participantIds.length < 2) throw new Error('Cần ít nhất 2 người tham gia để tạo hàng đợi song ca.');
+    if (participantIds.length < 2) throw new Error('Cần ít nhất 2 người tham gia để tạo phòng karaoke.');
     const client = requireSupabase();
     const { error: closeError } = await client.from('karaoke_sessions')
       .update({ status: 'completed', ended_at: new Date().toISOString() })
@@ -200,6 +211,7 @@ export const sessionRepository: ISessionRepository = {
       group_id: groupId,
       name: cleanDisplayString(name),
       created_by: userId,
+      selection_mode: selectionMode,
     }).select().single();
     if (error) throw new Error(message(error, 'Không thể tạo buổi hát.'));
     const session = data as KaraokeSession;
@@ -230,7 +242,7 @@ export const sessionRepository: ISessionRepository = {
       batches: (batchesResult.data ?? []) as RecommendationBatch[],
     };
   },
-  async addBatch(sessionId, recommendations, recycleMode) {
+  async addBatch(sessionId, recommendations, recycleMode, selectionMode) {
     if (!recommendations.length) return;
     const userId = await currentUserId();
     const client = requireSupabase();
@@ -244,6 +256,7 @@ export const sessionRepository: ISessionRepository = {
       session_id: sessionId,
       batch_number: (lastBatch?.batch_number ?? 0) + 1,
       recycle_mode: recycleMode,
+      selection_mode: selectionMode,
       created_by: userId,
     }).select().single();
     if (batchError) throw new Error(message(batchError, 'Không thể tạo lượt đề xuất.'));

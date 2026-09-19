@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -93,6 +93,7 @@ export type Database = {
           group_id: string
           id: string
           name: string
+          selection_mode: string
           status: Database["public"]["Enums"]["session_status"]
           updated_at: string
         }
@@ -103,6 +104,7 @@ export type Database = {
           group_id: string
           id?: string
           name: string
+          selection_mode?: string
           status?: Database["public"]["Enums"]["session_status"]
           updated_at?: string
         }
@@ -113,6 +115,7 @@ export type Database = {
           group_id?: string
           id?: string
           name?: string
+          selection_mode?: string
           status?: Database["public"]["Enums"]["session_status"]
           updated_at?: string
         }
@@ -441,6 +444,7 @@ export type Database = {
           created_by: string
           id: string
           recycle_mode: boolean
+          selection_mode: string
           session_id: string
         }
         Insert: {
@@ -449,6 +453,7 @@ export type Database = {
           created_by: string
           id?: string
           recycle_mode?: boolean
+          selection_mode?: string
           session_id: string
         }
         Update: {
@@ -457,6 +462,7 @@ export type Database = {
           created_by?: string
           id?: string
           recycle_mode?: boolean
+          selection_mode?: string
           session_id?: string
         }
         Relationships: [
@@ -522,7 +528,7 @@ export type Database = {
           score_metadata: Json
           session_id: string
           singer_1_id: string
-          singer_2_id: string
+          singer_2_id: string | null
           song_id: string
           state: Database["public"]["Enums"]["session_song_state"]
           updated_at: string
@@ -539,7 +545,7 @@ export type Database = {
           score_metadata?: Json
           session_id: string
           singer_1_id: string
-          singer_2_id: string
+          singer_2_id?: string | null
           song_id: string
           state?: Database["public"]["Enums"]["session_song_state"]
           updated_at?: string
@@ -556,7 +562,7 @@ export type Database = {
           score_metadata?: Json
           session_id?: string
           singer_1_id?: string
-          singer_2_id?: string
+          singer_2_id?: string | null
           song_id?: string
           state?: Database["public"]["Enums"]["session_song_state"]
           updated_at?: string
@@ -662,6 +668,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      dissolve_group: { Args: { target_group: string }; Returns: undefined }
       join_group_by_code: {
         Args: { requested_code: string }
         Returns: {

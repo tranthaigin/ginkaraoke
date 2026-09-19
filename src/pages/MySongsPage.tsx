@@ -6,7 +6,9 @@ import { matchesSearchQuery } from '../utils/normalize';
 import { AddSongModal } from '../components/AddSongModal';
 import { EditSongModal } from '../components/EditSongModal';
 import { EmptyState } from '../components/EmptyState';
-import { Search, Plus, Star, Flame, Music, X, Sparkles, Edit3 } from 'lucide-react';
+import { Search, Plus, Star, Flame, Music, X, Sparkles, Edit3, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const PAGE_SIZE = 12;
 
 export const MySongsPage: React.FC = () => {
   const { profile, showToast } = useApp();
@@ -15,6 +17,7 @@ export const MySongsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'ALL' | 'HIGH' | 'WANT' | 'FAVORITE'>('ALL');
   const [sortMode, setSortMode] = useState<'UPDATED' | 'TITLE' | 'PRIORITY'>('UPDATED');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingSong, setEditingSong] = useState<MemberSong | null>(null);
@@ -81,6 +84,21 @@ export const MySongsPage: React.FC = () => {
   const countHigh = songs.filter(s => s.priority === 'HIGH').length;
   const countWant = songs.filter(s => s.priority === 'WANT_TO_SING').length;
   const countFav = songs.filter(s => s.favorite).length;
+  const totalPages = Math.max(1, Math.ceil(filteredSongs.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedSongs = filteredSongs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const firstVisibleSong = filteredSongs.length ? (safePage - 1) * PAGE_SIZE + 1 : 0;
+  const lastVisibleSong = Math.min(safePage * PAGE_SIZE, filteredSongs.length);
+  const visiblePages = Array.from({ length: totalPages }, (_, index) => index + 1)
+    .filter(page => page === 1 || page === totalPages || Math.abs(page - safePage) <= 1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterTab, searchQuery, sortMode]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   return (
     <div className="page-container">
@@ -276,6 +294,7 @@ export const MySongsPage: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Sắp xếp:</span>
               <select
+                className="song-sort-select"
                 value={sortMode}
                 onChange={e => setSortMode(e.target.value as typeof sortMode)}
                 style={{
@@ -317,7 +336,7 @@ export const MySongsPage: React.FC = () => {
         />
       ) : (
         <div className="adaptive-cards-grid">
-          {filteredSongs.map(item => (
+          {paginatedSongs.map(item => (
             <div
               key={item.id}
               className="glass-card-interactive"
@@ -415,6 +434,51 @@ export const MySongsPage: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+
+      {!isLoading && filteredSongs.length > PAGE_SIZE && (
+        <nav className="songs-pagination" aria-label="Phân trang bài hát">
+          <p>
+            Hiển thị {firstVisibleSong}–{lastVisibleSong} trong {filteredSongs.length} bài
+          </p>
+          <div className="pagination-controls">
+            <button
+              type="button"
+              className="pagination-button"
+              aria-label="Trang trước"
+              disabled={safePage === 1}
+              onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+            >
+              <ChevronLeft size={17} />
+            </button>
+            {visiblePages.map((page, index) => {
+              const previous = visiblePages[index - 1];
+              return (
+                <span key={page} className="pagination-item">
+                  {previous && page - previous > 1 && <span className="pagination-ellipsis">…</span>}
+                  <button
+                    type="button"
+                    className={`pagination-button ${page === safePage ? 'is-active' : ''}`}
+                    aria-label={`Trang ${page}`}
+                    aria-current={page === safePage ? 'page' : undefined}
+                    onClick={() => setCurrentPage(page)}
+                  >
+                    {page}
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              type="button"
+              className="pagination-button"
+              aria-label="Trang sau"
+              disabled={safePage === totalPages}
+              onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+            >
+              <ChevronRight size={17} />
+            </button>
+          </div>
+        </nav>
       )}
 
       {/* Add Song Modal */}

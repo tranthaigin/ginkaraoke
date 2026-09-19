@@ -24,6 +24,7 @@ export const SingerPair: React.FC<SingerPairProps> = ({
 }) => {
   const name1 = singer1Name ?? singer1?.display_name ?? 'Ca sĩ 1';
   const name2 = singer2Name ?? singer2?.display_name ?? 'Ca sĩ 2';
+  const isSolo = !singer2 && !singer2Name;
 
   const avatarSize = isSpotlight ? 'lg' : size === 'lg' ? 'md' : size === 'sm' ? 'xs' : 'sm';
 
@@ -71,7 +72,7 @@ export const SingerPair: React.FC<SingerPairProps> = ({
         </span>
       </div>
 
-      {/* Visual Duet Bridge Connector */}
+      {/* Visual duet/solo connector */}
       <div
         className="duet-bridge"
         style={{
@@ -101,7 +102,7 @@ export const SingerPair: React.FC<SingerPairProps> = ({
             }}
           >
             <Zap size={13} fill="currentColor" color="var(--neon-cyan)" />
-            <span>DUO</span>
+            <span>{isSolo ? 'SOLO' : 'DUO'}</span>
           </div>
         ) : (
           <div
@@ -119,13 +120,13 @@ export const SingerPair: React.FC<SingerPairProps> = ({
               fontWeight: 800,
             }}
           >
-            {size === 'sm' ? '+' : <Zap size={11} fill="currentColor" />}
+            {isSolo ? '1' : size === 'sm' ? '+' : <Zap size={11} fill="currentColor" />}
           </div>
         )}
       </div>
 
-      {/* Singer 2 */}
-      <div
+      {/* Singer 2 (absent for an explicitly random solo entry) */}
+      {!isSolo && <div
         className="singer-chip singer-2"
         style={{
           display: 'flex',
@@ -156,7 +157,7 @@ export const SingerPair: React.FC<SingerPairProps> = ({
         >
           {name2}
         </span>
-      </div>
+      </div>}
     </div>
   );
 };

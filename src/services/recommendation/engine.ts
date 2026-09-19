@@ -21,6 +21,7 @@ export interface GeneratePlaylistInput {
   recycleMode?: boolean;
   limit?: number;
   config?: Partial<RecommendationConfig>;
+  random?: () => number;
 }
 
 export interface Availability {
@@ -45,7 +46,7 @@ interface EngineState {
   pairs: Map<string, number>;
   partners: Map<string, Set<string>>;
   lastSeen: Map<string, number>;
-  previous: [string, string] | null;
+  previous: string[] | null;
   position: number;
 }
 
@@ -97,19 +98,23 @@ function historyState(memberIds: string[], history: QueueHistoryItem[]): EngineS
   const pairs = new Map<string, number>();
   const partners = new Map<string, Set<string>>(memberIds.map(id => [id, new Set<string>()]));
   const lastSeen = new Map<string, number>();
-  let previous: [string, string] | null = null;
+  let previous: string[] | null = null;
 
   history.forEach((item, index) => {
     const [a, b] = item.singerIds;
     turns.set(a, (turns.get(a) ?? 0) + 1);
-    turns.set(b, (turns.get(b) ?? 0) + 1);
-    const key = pairKey(a, b);
-    pairs.set(key, (pairs.get(key) ?? 0) + 1);
-    partners.get(a)?.add(b);
-    partners.get(b)?.add(a);
     lastSeen.set(a, index);
-    lastSeen.set(b, index);
-    previous = [a, b];
+    if (b) {
+      turns.set(b, (turns.get(b) ?? 0) + 1);
+      const key = pairKey(a, b);
+      pairs.set(key, (pairs.get(key) ?? 0) + 1);
+      partners.get(a)?.add(b);
+      partners.get(b)?.add(a);
+      lastSeen.set(b, index);
+      previous = [a, b];
+    } else {
+      previous = [a];
+    }
   });
 
   return { turns, pairs, partners, lastSeen, previous, position: history.length };
@@ -221,10 +226,94 @@ export function generateKaraokePlaylist(input: GeneratePlaylistInput): SongRecom
   return output;
 }
 
+function shuffled<T>(values: T[], random: () => number): T[] {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(random() * (index + 1));
+    [result[index], result[randomIndex]] = [result[randomIndex], result[index]];
+  }
+  return result;
+}
+
+function buildRandomCandidates(input: GeneratePlaylistInput) {
+  const validMemberIds = new Set(input.members.map(member => member.id));
+  const selected = new Set(input.selectedMemberIds.filter(id => validMemberIds.has(id)));
+  const songs = new Map(input.allSongs.map(song => [song.id, song]));
+  const used = new Set((input.sessionHistory ?? []).map(item => item.songId));
+  const entriesBySong = new Map<string, MemberSong[]>();
+
+  for (const item of input.memberSongs) {
+    if (!selected.has(item.user_id) || (!input.recycleMode && used.has(item.song_id))) continue;
+    const entries = entriesBySong.get(item.song_id) ?? [];
+    if (!entries.some(entry => entry.user_id === item.user_id)) entries.push(item);
+    entriesBySong.set(item.song_id, entries);
+  }
+
+  return [...entriesBySong.entries()].flatMap(([songId, entries]) => {
+    const song = songs.get(songId);
+    if (!song || !entries.length) return [];
+    const priorities = entries.map(entry => entry.priority);
+    return [{
+      song,
+      eligibleSingerIds: entries.map(entry => entry.user_id),
+      topPriority: priorities.includes('HIGH') ? 'HIGH' as const
+        : priorities.includes('WANT_TO_SING') ? 'WANT_TO_SING' as const
+          : 'NORMAL' as const,
+      hasFavorite: entries.some(entry => entry.favorite),
+    }];
+  });
+}
+
+/**
+ * Random mode deliberately ignores overlap, priority, favorite, fairness and
+ * history scoring. It samples distinct songs uniformly from the union of the
+ * selected attendees' playlists. A song known by one attendee is a solo entry;
+ * a song known by multiple attendees receives two randomly selected valid singers.
+ */
+export function generateRandomPlaylist(input: GeneratePlaylistInput): SongRecommendation[] {
+  const cfg = { ...DEFAULT_RECOMMENDATION_CONFIG, ...input.config };
+  const random = input.random ?? Math.random;
+  const candidates = shuffled(buildRandomCandidates(input), random);
+  const cap = Math.max(0, Math.min(input.limit ?? cfg.MAX_BATCH_SIZE, cfg.MAX_BATCH_SIZE));
+  const emptyBreakdown: RecommendationScoreBreakdown = {
+    compatibility: 0,
+    priority: 0,
+    favorite: 0,
+    pairDiversity: 0,
+    fairness: 0,
+    rest: 0,
+    repeatedPairPenalty: 0,
+    consecutiveSingerPenalty: 0,
+    recentHistoryPenalty: 0,
+  };
+
+  return candidates.slice(0, cap).map(candidate => {
+    const singers = shuffled(candidate.eligibleSingerIds, random);
+    return {
+      song: candidate.song,
+      eligibleSingerIds: candidate.eligibleSingerIds,
+      singerIds: [singers[0], singers[1] ?? null],
+      matchCount: candidate.eligibleSingerIds.length,
+      totalParticipants: new Set(input.selectedMemberIds).size,
+      score: 0,
+      scoreBreakdown: { ...emptyBreakdown },
+      topPriority: candidate.topPriority,
+      hasFavorite: candidate.hasFavorite,
+      recycleMode: Boolean(input.recycleMode),
+    };
+  });
+}
+
 export function inspectAvailability(input: GeneratePlaylistInput): Availability {
   const cfg = { ...DEFAULT_RECOMMENDATION_CONFIG, ...input.config };
   const eligibleSongs = buildCandidates({ ...input, recycleMode: true }, cfg).length;
   const unusedSongs = buildCandidates({ ...input, recycleMode: false }, cfg).length;
+  return { eligibleSongs, unusedSongs, exhausted: eligibleSongs > 0 && unusedSongs === 0 };
+}
+
+export function inspectRandomAvailability(input: GeneratePlaylistInput): Availability {
+  const eligibleSongs = buildRandomCandidates({ ...input, recycleMode: true }).length;
+  const unusedSongs = buildRandomCandidates({ ...input, recycleMode: false }).length;
   return { eligibleSongs, unusedSongs, exhausted: eligibleSongs > 0 && unusedSongs === 0 };
 }
 

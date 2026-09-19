@@ -55,7 +55,7 @@ export function HistoryPage() {
         </span>
         <h1 style={{ fontSize: '1.6rem', marginTop: '4px' }}>Lịch sử những buổi hát</h1>
         <p className="muted" style={{ fontSize: '0.84rem', marginTop: '2px' }}>
-          Lưu lại các cặp song ca, bài hát đã thể hiện và kỷ niệm của hội bạn.
+          Lưu lại người hát, bài hát đã thể hiện và kỷ niệm của hội bạn.
         </p>
       </section>
 
@@ -67,7 +67,7 @@ export function HistoryPage() {
         <EmptyState
           icon={<History size={32} />}
           title="Chưa có buổi hát nào được lưu"
-          description="Khi bạn hoàn tất một buổi hát trong phòng Karaoke, mọi dữ liệu về bài hát và cặp song ca sẽ được lưu giữ tại đây."
+          description="Khi bạn hoàn tất một buổi hát trong phòng Karaoke, bài hát và người thể hiện sẽ được lưu giữ tại đây."
         />
       ) : (
         <div className="adaptive-history-grid">
@@ -116,6 +116,11 @@ export function HistoryPage() {
                       {session.status === 'active' && (
                         <span className="badge badge-emerald" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
                           <Mic size={10} /> Đang diễn ra
+                        </span>
+                      )}
+                      {session.selection_mode === 'RANDOM' && (
+                        <span className="badge badge-amber" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
+                          Ngẫu nhiên
                         </span>
                       )}
                     </div>
@@ -245,7 +250,8 @@ export function HistoryPage() {
                                       whiteSpace: 'nowrap',
                                     }}
                                   >
-                                    {names.get(song.singer_1_id)} + {names.get(song.singer_2_id)}
+                                    {names.get(song.singer_1_id)}
+                                    {song.singer_2_id ? ` + ${names.get(song.singer_2_id)}` : ' · Solo'}
                                   </span>
                                 </div>
                               ))}

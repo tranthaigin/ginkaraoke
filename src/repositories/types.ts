@@ -5,6 +5,7 @@ import type {
   MemberSong,
   Profile,
   RecommendationBatch,
+  SelectionMode,
   SessionSong,
   Song,
   SongRecommendation,
@@ -28,6 +29,7 @@ export interface IGroupRepository {
   join(code: string): Promise<Group>;
   getMembers(groupId: string): Promise<GroupMember[]>;
   removeMember(groupId: string, userId: string): Promise<void>;
+  dissolve(groupId: string): Promise<void>;
 }
 
 export interface ISongRepository {
@@ -47,9 +49,9 @@ export interface IMemberSongRepository {
 export interface ISessionRepository {
   list(groupId: string): Promise<KaraokeSession[]>;
   getActive(groupId: string): Promise<KaraokeSession | null>;
-  create(groupId: string, name: string, participantIds: string[]): Promise<KaraokeSession>;
+  create(groupId: string, name: string, participantIds: string[], selectionMode: SelectionMode): Promise<KaraokeSession>;
   details(sessionId: string): Promise<SessionDetails | null>;
-  addBatch(sessionId: string, recommendations: SongRecommendation[], recycleMode: boolean): Promise<void>;
+  addBatch(sessionId: string, recommendations: SongRecommendation[], recycleMode: boolean, selectionMode: SelectionMode): Promise<void>;
   setSongState(id: string, played: boolean): Promise<void>;
   prioritize(id: string, position: number): Promise<void>;
   removeSong(id: string): Promise<void>;

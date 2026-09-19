@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Member, MemberSong, QueueHistoryItem, Song } from '../../types';
-import { calculateSessionStats, generateKaraokePlaylist, inspectAvailability } from './engine';
+import {
+  calculateSessionStats,
+  generateKaraokePlaylist,
+  generateRandomPlaylist,
+  inspectAvailability,
+  inspectRandomAvailability,
+} from './engine';
 
 const members: Member[] = ['A', 'B', 'C', 'D', 'E'].map(id => ({ id, display_name: id }));
 const songs: Song[] = Array.from({ length: 70 }, (_, index) => ({
@@ -46,7 +52,7 @@ describe('deterministic duet recommendation engine', () => {
   it('assigns exactly two eligible singers to a shared song', () => {
     const result = generateKaraokePlaylist({ ...base, limit: 1 });
     expect(result[0].singerIds).toHaveLength(2);
-    expect(result[0].singerIds.every(id => result[0].eligibleSingerIds.includes(id))).toBe(true);
+    expect(result[0].singerIds.every(id => id !== null && result[0].eligibleSingerIds.includes(id))).toBe(true);
   });
 
   it('ranks a song known by many participants strongly', () => {
@@ -68,7 +74,7 @@ describe('deterministic duet recommendation engine', () => {
     const history: QueueHistoryItem[] = [{ songId: 'old', singerIds: ['A', 'B'], state: 'PLAYED' }];
     const shared = memberships.filter(item => item.song_id === 's00');
     const result = generateKaraokePlaylist({ ...base, memberSongs: shared, allSongs: [songs[0]], sessionHistory: history });
-    expect(result[0].singerIds.every(id => !['A', 'B'].includes(id))).toBe(true);
+    expect(result[0].singerIds.every(id => id !== null && !['A', 'B'].includes(id))).toBe(true);
   });
 
   it('makes rested valid singers more likely', () => {
@@ -89,7 +95,7 @@ describe('deterministic duet recommendation engine', () => {
 
   it('never assigns a singer who does not know a song', () => {
     const result = generateKaraokePlaylist(base);
-    expect(result.every(item => item.singerIds.every(id => item.eligibleSingerIds.includes(id)))).toBe(true);
+    expect(result.every(item => item.singerIds.every(id => id !== null && item.eligibleSingerIds.includes(id)))).toBe(true);
   });
 
   it('returns at most 50 entries by default', () => {
@@ -148,5 +154,57 @@ describe('deterministic duet recommendation engine', () => {
   it('ignores song knowledge belonging to absent group members', () => {
     const result = generateKaraokePlaylist({ ...base, selectedMemberIds: ['A', 'B'] });
     expect(result.every(item => item.eligibleSingerIds.every(id => ['A', 'B'].includes(id)))).toBe(true);
+  });
+});
+
+describe('unscored random playlist mode', () => {
+  const soloMembership: MemberSong = {
+    id: 'solo-A',
+    user_id: 'A',
+    song_id: 's01',
+    favorite: true,
+    priority: 'HIGH',
+  };
+
+  it('includes a song from the selected playlists even when it is not shared', () => {
+    const result = generateRandomPlaylist({
+      selectedMemberIds: ['A', 'B'],
+      members,
+      memberSongs: [soloMembership],
+      allSongs: [songs[1]],
+      random: () => 0,
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].singerIds).toEqual(['A', null]);
+    expect(result[0].eligibleSingerIds).toEqual(['A']);
+  });
+
+  it('does not use priority, favorite, compatibility, or fairness scores', () => {
+    const result = generateRandomPlaylist({ ...base, limit: 8, random: () => 0.25 });
+    expect(result).toHaveLength(8);
+    expect(result.every(item => item.score === 0)).toBe(true);
+    expect(result.every(item => Object.values(item.scoreBreakdown).every(value => value === 0))).toBe(true);
+  });
+
+  it('samples distinct unused songs and respects the 50-song cap', () => {
+    const result = generateRandomPlaylist({ ...base, random: () => 0.5 });
+    expect(result).toHaveLength(50);
+    expect(new Set(result.map(item => item.song.id)).size).toBe(50);
+    const next = generateRandomPlaylist({
+      ...base,
+      sessionHistory: toHistory(result),
+      random: () => 0.5,
+    });
+    const firstIds = new Set(result.map(item => item.song.id));
+    expect(next.every(item => !firstIds.has(item.song.id))).toBe(true);
+  });
+
+  it('reports availability across the union of selected playlists', () => {
+    expect(inspectRandomAvailability({
+      selectedMemberIds: ['A', 'B'],
+      members,
+      memberSongs: [soloMembership],
+      allSongs: [songs[1]],
+    })).toEqual({ eligibleSongs: 1, unusedSongs: 1, exhausted: false });
   });
 });

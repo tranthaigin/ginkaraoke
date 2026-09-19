@@ -2,6 +2,7 @@ export type Priority = 'NORMAL' | 'WANT_TO_SING' | 'HIGH';
 export type GroupRole = 'owner' | 'member';
 export type SessionStatus = 'active' | 'completed';
 export type SessionSongState = 'QUEUED' | 'PLAYED';
+export type SelectionMode = 'SMART' | 'RANDOM';
 export type SongAvailabilityState = 'AVAILABLE' | SessionSongState;
 
 export interface Profile {
@@ -62,6 +63,7 @@ export interface KaraokeSession {
   group_id: string;
   name: string;
   status: SessionStatus;
+  selection_mode: SelectionMode;
   created_by: string;
   created_at: string;
   ended_at: string | null;
@@ -80,6 +82,7 @@ export interface RecommendationBatch {
   session_id: string;
   batch_number: number;
   recycle_mode: boolean;
+  selection_mode: SelectionMode;
   created_by: string;
   created_at: string;
 }
@@ -103,7 +106,7 @@ export interface SessionSong {
   batch_id: string;
   song_id: string;
   singer_1_id: string;
-  singer_2_id: string;
+  singer_2_id: string | null;
   eligible_singer_ids: string[];
   state: SessionSongState;
   queue_position: number;
@@ -115,19 +118,19 @@ export interface SessionSong {
   updated_at?: string;
   song?: Song;
   singer_1?: Profile;
-  singer_2?: Profile;
+  singer_2?: Profile | null;
 }
 
 export interface QueueHistoryItem {
   songId: string;
-  singerIds: [string, string];
+  singerIds: [string, string | null];
   state: SessionSongState;
 }
 
 export interface SongRecommendation {
   song: Song;
   eligibleSingerIds: string[];
-  singerIds: [string, string];
+  singerIds: [string, string | null];
   matchCount: number;
   totalParticipants: number;
   score: number;

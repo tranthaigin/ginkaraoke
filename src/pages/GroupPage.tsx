@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { Check, Copy, Crown, LogOut, Plus, Sparkles, UserMinus, Users } from 'lucide-react';
+import { Check, Copy, Crown, LogOut, Plus, Sparkles, Trash2, UserMinus, Users } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { MemberAvatar } from '../components/MemberAvatar';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export function GroupPage() {
   const {
@@ -16,6 +17,7 @@ export function GroupPage() {
     joinGroup,
     selectGroup,
     removeMember,
+    dissolveGroup,
     saveProfile,
     showToast,
   } = useApp();
@@ -24,6 +26,7 @@ export function GroupPage() {
   const [value, setValue] = useState('');
   const [name, setName] = useState(profile?.display_name ?? '');
   const [copied, setCopied] = useState(false);
+  const [confirmDissolve, setConfirmDissolve] = useState(false);
   const owner = currentGroup?.owner_id === user?.id;
 
   const submit = async (event: FormEvent) => {
@@ -58,6 +61,15 @@ export function GroupPage() {
       showToast('Đã cập nhật danh sách thành viên.', 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Không thể cập nhật thành viên.', 'error');
+    }
+  };
+
+  const dissolve = async () => {
+    try {
+      await dissolveGroup();
+      setConfirmDissolve(false);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Không thể giải tán nhóm.', 'error');
     }
   };
 
@@ -250,6 +262,17 @@ export function GroupPage() {
                 <Plus size={16} /> Tạo nhóm mới
               </button>
             </div>
+
+            {owner && (
+              <button
+                type="button"
+                className="group-dissolve-button"
+                onClick={() => setConfirmDissolve(true)}
+              >
+                <Trash2 size={15} />
+                <span>Giải tán nhóm này</span>
+              </button>
+            )}
           </section>
 
           {/* Group Switcher Chips if in multiple groups */}
@@ -374,6 +397,18 @@ export function GroupPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDissolve}
+        title="Giải tán nhóm?"
+        description={`Nhóm “${currentGroup?.name ?? ''}”, danh sách thành viên, các phòng hát và lịch sử của nhóm sẽ bị xóa vĩnh viễn. Playlist cá nhân của mỗi người vẫn được giữ lại.`}
+        confirmLabel="Giải tán vĩnh viễn"
+        cancelLabel="Giữ lại"
+        variant="danger"
+        isBusy={isBusy}
+        onConfirm={() => void dissolve()}
+        onCancel={() => setConfirmDissolve(false)}
+      />
     </div>
   );
 }
