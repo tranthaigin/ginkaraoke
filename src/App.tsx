@@ -9,6 +9,7 @@ import { MySongsPage } from './pages/MySongsPage';
 import { KaraokePage } from './pages/KaraokePage';
 import { HistoryPage } from './pages/HistoryPage';
 import { GroupPage } from './pages/GroupPage';
+import { PrivacyPage } from './pages/PrivacyPage';
 
 function ProtectedApp() {
   const { authStatus, profile, currentGroup } = useApp();
@@ -34,10 +35,11 @@ function ProtectedApp() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <HashRouter>
-        <ProtectedApp />
-      </HashRouter>
-    </AppProvider>
+    <HashRouter>
+      <Routes>
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="*" element={<AppProvider><ProtectedApp /></AppProvider>} />
+      </Routes>
+    </HashRouter>
   );
 }

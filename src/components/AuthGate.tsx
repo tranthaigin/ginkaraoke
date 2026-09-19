@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { AlertTriangle, ArrowRight, LoaderCircle, Plus, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { GinKaraokeLogo } from './GinKaraokeLogo';
 import { MemberAvatar } from './MemberAvatar';
@@ -150,6 +151,9 @@ export function AuthGate() {
           <p className="fine-print" style={{ marginTop: '10px' }}>
             Đăng nhập an toàn qua Supabase Auth. Không cần mật khẩu.
           </p>
+          <Link className="privacy-login-link" to="/privacy">
+            Chính sách quyền riêng tư
+          </Link>
         </div>
       </div>
     );
