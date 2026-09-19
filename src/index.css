@@ -2371,28 +2371,53 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .queue-track-item {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 10px;
-  row-gap: 8px;
-  padding: 12px;
+  column-gap: 8px;
+  row-gap: 6px;
+  padding: 9px 10px;
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: 12px;
   transition: all var(--transition-fast);
 }
 
 .queue-track-item .queue-number {
   grid-column: 1;
   grid-row: 1;
-  align-self: start;
-  padding-top: 2px;
+  align-self: center;
+  width: 24px !important;
+  padding: 0;
+  font-size: 0.78rem;
 }
 
 .queue-track-details {
   grid-column: 2;
   grid-row: 1;
   min-width: 0;
+}
+
+.queue-track-title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 750;
+  line-height: 1.28;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-track-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 16px;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.25;
 }
 
 .queue-track-singers {
@@ -2403,15 +2428,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .queue-track-actions {
-  grid-column: 2;
-  grid-row: 3;
+  grid-column: 3;
+  grid-row: 1;
   display: flex;
   align-items: center;
-  gap: 7px;
+  justify-self: end;
+  gap: 5px;
 }
 
-.queue-track-item.is-random .queue-track-actions {
-  grid-row: 2;
+.queue-track-actions .btn-icon {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  border-radius: 10px;
 }
 
 .queue-action-complete {
@@ -2458,46 +2487,28 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .playlist-source-button.is-compact {
-  margin: 4px 0 0;
-  padding: 3px 7px;
-  font-size: 0.68rem;
-}
-
-@media (min-width: 640px) {
-  .queue-track-item {
-    grid-template-columns: 28px minmax(0, 1fr) auto;
-  }
-
-  .queue-track-details {
-    grid-column: 2;
-  }
-
-  .queue-track-singers {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .queue-track-actions {
-    grid-column: 3;
-    grid-row: 1 / span 2;
-    justify-self: end;
-  }
+  margin: 0;
+  padding: 2px 7px;
+  font-size: 0.66rem;
+  line-height: 1.25;
 }
 
 @media (min-width: 1024px) {
   .queue-track-item {
-    grid-template-columns: 32px 1fr auto auto;
-    gap: 16px;
-    padding: 8px 16px;
+    grid-template-columns: 28px minmax(0, 1fr) auto auto;
+    grid-template-rows: auto;
+    column-gap: 12px;
+    padding: 8px 12px;
   }
 
   .queue-track-item.is-random {
-    grid-template-columns: 32px 1fr auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
   }
 
   .queue-track-singers {
     grid-column: 3;
     grid-row: 1;
+    justify-self: end;
   }
 
   .queue-track-actions {
@@ -2507,6 +2518,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
   .queue-track-item.is-random .queue-track-actions {
     grid-column: 3;
+    grid-row: 1;
   }
 }
 

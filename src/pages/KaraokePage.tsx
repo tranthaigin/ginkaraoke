@@ -915,22 +915,13 @@ export function KaraokePage() {
 
                   {/* Song Title & Artist */}
                   <div className="queue-track-details">
-                    <h3
-                      style={{
-                        fontFamily: 'var(--font-display)',
-                        fontWeight: 700,
-                        fontSize: '0.94rem',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
+                    <h3 className="queue-track-title">
                       {song.song?.title}
                     </h3>
-                    {isRandomSong(song) && playlistSourceButton(song, true)}
-                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                      {song.song?.artist || 'Chưa rõ nghệ sĩ'}
-                    </p>
+                    <div className="queue-track-meta">
+                      {isRandomSong(song) && playlistSourceButton(song, true)}
+                      {song.song?.artist && <span>{song.song.artist}</span>}
+                    </div>
                   </div>
 
                   {/* Singer assignment exists only in smart mode. */}
