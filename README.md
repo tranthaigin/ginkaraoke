@@ -74,7 +74,7 @@ Google's OAuth callback remains the Supabase callback shown in the provider setu
 
 Normal batches exclude every song already queued or played in the current session. State from earlier batches contributes to pair/turn fairness. Solo-only songs are excluded from the main duet queue. Recycle mode is an explicit input and never activates automatically.
 
-Random mode uses a uniform shuffle over distinct songs in the union of the selected attendees' playlists. It ignores compatibility, priority, favorites, and turn scoring, and never assigns singers. Each queue row retains the selected members whose playlists contain the song so the UI can show its source on demand.
+Random mode uses a uniform shuffle over distinct songs in the union of the selected attendees' playlists. It ignores compatibility, priority, favorites, and turn scoring, and never assigns singers. Each queue row retains the selected members whose playlists contain the song so the UI can show its source on demand. An active Smart room can add a Random batch without ending or recreating the session; assignment rules are enforced per batch in PostgreSQL.
 
 ## Quality checks
 

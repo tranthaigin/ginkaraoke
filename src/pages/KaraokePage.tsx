@@ -25,7 +25,7 @@ import {
   inspectAvailability,
   inspectRandomAvailability,
 } from '../services/recommendation/engine';
-import type { KaraokeSession, Profile, QueueHistoryItem, SelectionMode, SessionSong } from '../types';
+import type { KaraokeSession, Profile, QueueHistoryItem, RecommendationBatch, SelectionMode, SessionSong } from '../types';
 import { supabase } from '../services/supabase';
 import { SingerPair } from '../components/SingerPair';
 import { MemberAvatar } from '../components/MemberAvatar';
@@ -37,6 +37,7 @@ interface RoomData {
   session: KaraokeSession;
   members: Profile[];
   songs: SessionSong[];
+  batches: RecommendationBatch[];
 }
 
 const defaultName = () => `Karaoke ${new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}`;
@@ -63,6 +64,7 @@ export function KaraokePage() {
   const [busy, setBusy] = useState(false);
   const [showPlayed, setShowPlayed] = useState(false);
   const [confirmRecycle, setConfirmRecycle] = useState(false);
+  const [recycleModeTarget, setRecycleModeTarget] = useState<SelectionMode | null>(null);
   const [confirmComplete, setConfirmComplete] = useState(false);
   const [inspectionSong, setInspectionSong] = useState<SessionSong | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,7 +104,12 @@ export function KaraokePage() {
     async (session: KaraokeSession | string) => {
       const details = await SessionRepo.details(typeof session === 'string' ? session : session.id);
       if (!details) return;
-      const data = { session: details.session, members: details.members, songs: details.songs };
+      const data = {
+        session: details.session,
+        members: details.members,
+        songs: details.songs,
+        batches: details.batches,
+      };
       setRoom(data);
       await calculateAvailability(data);
     },
@@ -185,7 +192,7 @@ export function KaraokePage() {
     recycleMode: boolean,
     mode: SelectionMode,
   ) => {
-    if (!selectedGroup) return [];
+    if (!selectedGroup) throw new Error('Hãy chọn nhóm karaoke trước.');
     const [memberSongs, songs, recent] = await Promise.all([
       MemberSongRepo.getForGroup(selectedGroup.id),
       SongRepo.getAll(),
@@ -200,7 +207,14 @@ export function KaraokePage() {
       recentlySungSongIds: recent,
       recycleMode,
     };
-    return mode === 'RANDOM' ? generateRandomPlaylist(input) : generateKaraokePlaylist(input);
+    return {
+      recommendations: mode === 'RANDOM'
+        ? generateRandomPlaylist(input)
+        : generateKaraokePlaylist(input),
+      modeAvailability: mode === 'RANDOM'
+        ? inspectRandomAvailability(input)
+        : inspectAvailability(input),
+    };
   };
 
   const createRoom = async () => {
@@ -218,7 +232,7 @@ export function KaraokePage() {
     }
     setBusy(true);
     try {
-      const recommendations = await computeRecommendations(selected, [], false, selectionMode);
+      const { recommendations } = await computeRecommendations(selected, [], false, selectionMode);
       if (!recommendations.length) {
         throw new Error(selectionMode === 'RANDOM'
           ? 'Những thành viên đã chọn chưa có bài hát nào trong playlist.'
@@ -237,33 +251,40 @@ export function KaraokePage() {
     }
   };
 
-  const generateNext = async (recycleMode = false) => {
+  const generateNext = async (
+    recycleMode = false,
+    mode: SelectionMode = room?.session.selection_mode ?? 'SMART',
+  ) => {
     if (!room || !isOnline) {
       showToast('Cần kết nối mạng để tạo lượt mới.', 'warning');
       return;
     }
     setBusy(true);
     try {
-      const result = await computeRecommendations(
+      const { recommendations: result, modeAvailability } = await computeRecommendations(
         room.members.map(member => member.id),
         room.songs,
         recycleMode,
-        room.session.selection_mode,
+        mode,
       );
       if (!result.length) {
-        if (availability?.exhausted && !recycleMode) {
+        if (modeAvailability.exhausted && !recycleMode) {
+          setRecycleModeTarget(mode);
           setConfirmRecycle(true);
         } else {
-          showToast(room.session.selection_mode === 'RANDOM'
+          showToast(mode === 'RANDOM'
             ? 'Không còn bài nào trong các playlist đã chọn.'
             : 'Không còn bài song ca phù hợp để tạo lượt mới.', 'warning');
         }
         return;
       }
-      await SessionRepo.addBatch(room.session.id, result, recycleMode, room.session.selection_mode);
+      await SessionRepo.addBatch(room.session.id, result, recycleMode, mode);
       await loadRoom(room.session);
       setConfirmRecycle(false);
-      showToast(`${recycleMode ? 'Đã dùng lại' : 'Đã thêm'} ${result.length} bài vào hàng đợi!`, 'success');
+      setRecycleModeTarget(null);
+      showToast(mode === 'RANDOM'
+        ? `${recycleMode ? 'Đã bốc lại' : 'Đã lên'} ${result.length} bài ngẫu nhiên, không phân công người hát! 🎲`
+        : `${recycleMode ? 'Đã dùng lại' : 'Đã thêm'} ${result.length} bài vào hàng đợi!`, 'success');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Không thể tạo lượt đề xuất.', 'error');
     } finally {
@@ -602,6 +623,11 @@ export function KaraokePage() {
   const secondSingerProfile = (id: string | null) => id ? profileById.get(id) : undefined;
   const secondSingerName = (id: string | null) => id ? nameById.get(id) : undefined;
   const isRandomRoom = room.session.selection_mode === 'RANDOM';
+  const batchModeById = new Map(room.batches.map(batch => [batch.id, batch.selection_mode]));
+  const modeForSong = (song: SessionSong): SelectionMode =>
+    batchModeById.get(song.batch_id) ?? room.session.selection_mode;
+  const isRandomSong = (song: SessionSong) => modeForSong(song) === 'RANDOM';
+  const hasRandomBatch = room.batches.some(batch => batch.selection_mode === 'RANDOM');
   const playlistOwnerNames = (song: SessionSong) => song.eligible_singer_ids
     .map(id => nameById.get(id))
     .filter((name): name is string => Boolean(name));
@@ -663,9 +689,9 @@ export function KaraokePage() {
             />
             <span>ĐANG HÁT TRỰC TIẾP</span>
           </span>
-          {isRandomRoom && (
+          {hasRandomBatch && (
             <span className="badge badge-amber" style={{ marginBottom: '6px', marginLeft: '6px' }}>
-              <Shuffle size={11} /> NGẪU NHIÊN
+              <Shuffle size={11} /> CÓ BÀI NGẪU NHIÊN
             </span>
           )}
 
@@ -770,11 +796,11 @@ export function KaraokePage() {
           </div>
 
           <h2 className="spotlight-title">{spotlightSong.song?.title}</h2>
-          {isRandomRoom && playlistSourceButton(spotlightSong)}
+          {isRandomSong(spotlightSong) && playlistSourceButton(spotlightSong)}
           <p className="spotlight-artist">{spotlightSong.song?.artist || 'Chưa rõ nghệ sĩ'}</p>
 
           {/* Smart mode assigns singers; random mode only exposes playlist ownership. */}
-          {!isRandomRoom && <div
+          {!isRandomSong(spotlightSong) && <div
             style={{
               background: 'rgba(0, 0, 0, 0.25)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -802,7 +828,7 @@ export function KaraokePage() {
           </div>}
 
           {/* Primary Spotlight Action: Done / Played */}
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className="spotlight-actions">
             <button
               className="btn-primary"
               onClick={() => void mutate(() => SessionRepo.setSongState(spotlightSong.id, true), 'Đã hát xong! Tiếp tục quẩy 🎤')}
@@ -859,7 +885,7 @@ export function KaraokePage() {
           ========================================================= */}
       {subsequentQueue.length > 0 && (
         <section style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+          <div className="queue-section-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <MusicIcon />
               <h2 style={{ fontSize: '1.15rem' }}>
@@ -870,8 +896,7 @@ export function KaraokePage() {
             <button
               disabled={busy}
               onClick={() => void generateNext(false)}
-              className="text-button"
-              style={{ fontSize: '0.82rem' }}
+              className="queue-add-button"
             >
               <Plus size={16} />
               <span>{isRandomRoom ? 'Bốc thêm (+50)' : 'Thêm bài (+50)'}</span>
@@ -882,14 +907,14 @@ export function KaraokePage() {
             {subsequentQueue.map((song, index) => {
               const queuePosition = index + 2;
               return (
-                <article className={`queue-track-item ${isRandomRoom ? 'is-random' : ''}`} key={song.id}>
+                <article className={`queue-track-item ${isRandomSong(song) ? 'is-random' : ''}`} key={song.id}>
                   {/* Queue Number */}
                   <span className="queue-number" style={{ width: '24px', textAlign: 'center' }}>
                     {String(queuePosition).padStart(2, '0')}
                   </span>
 
                   {/* Song Title & Artist */}
-                  <div style={{ minWidth: 0 }}>
+                  <div className="queue-track-details">
                     <h3
                       style={{
                         fontFamily: 'var(--font-display)',
@@ -902,14 +927,14 @@ export function KaraokePage() {
                     >
                       {song.song?.title}
                     </h3>
-                    {isRandomRoom && playlistSourceButton(song, true)}
+                    {isRandomSong(song) && playlistSourceButton(song, true)}
                     <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
                       {song.song?.artist || 'Chưa rõ nghệ sĩ'}
                     </p>
                   </div>
 
                   {/* Singer assignment exists only in smart mode. */}
-                  {!isRandomRoom && <div style={{ flexShrink: 0 }}>
+                  {!isRandomSong(song) && <div className="queue-track-singers">
                     <SingerPair
                       singer1={song.singer_1_id ? profileById.get(song.singer_1_id) : undefined}
                       singer2={secondSingerProfile(song.singer_2_id)}
@@ -920,11 +945,10 @@ export function KaraokePage() {
                   </div>}
 
                   {/* Actions for Queue Item */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div className="queue-track-actions">
                     {/* Prioritize / Move to Top */}
                     <button
                       className="btn-icon"
-                      style={{ width: '32px', height: '32px' }}
                       title="Đưa bài lên đầu hàng đợi"
                       aria-label="Đưa lên đầu"
                       onClick={() =>
@@ -940,7 +964,7 @@ export function KaraokePage() {
                     {/* Delete */}
                     <button
                       className="btn-icon"
-                      style={{ width: '32px', height: '32px', color: 'var(--text-muted)' }}
+                      style={{ color: 'var(--text-muted)' }}
                       title="Bỏ bài"
                       aria-label="Bỏ bài"
                       onClick={() =>
@@ -955,16 +979,7 @@ export function KaraokePage() {
 
                     {/* Mark Played Directly */}
                     <button
-                      className="btn-primary"
-                      style={{
-                        minHeight: '30px',
-                        padding: '4px 10px',
-                        fontSize: '0.78rem',
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid var(--border-subtle)',
-                        boxShadow: 'none',
-                        color: 'var(--neon-emerald)',
-                      }}
+                      className="btn-icon queue-action-complete"
                       title="Đánh dấu đã hát"
                       onClick={() =>
                         void mutate(
@@ -981,6 +996,19 @@ export function KaraokePage() {
             })}
           </div>
         </section>
+      )}
+
+      {!isRandomRoom && (
+        <button
+          type="button"
+          className="btn-secondary random-queue-button"
+          disabled={busy}
+          onClick={() => void generateNext(false, 'RANDOM')}
+        >
+          <Shuffle size={18} />
+          <span>Lên tối đa 50 bài ngẫu nhiên</span>
+          <small>Không phân công người hát</small>
+        </button>
       )}
 
       {/* Button to Generate More Recommendations if Queue has songs */}
@@ -1062,7 +1090,7 @@ export function KaraokePage() {
                       {song.song?.title}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {isRandomRoom
+                      {isRandomSong(song)
                         ? playlistOwnerNames(song).join(', ')
                         : performerNames(song)}
                       {song.played_at && (
@@ -1129,7 +1157,7 @@ export function KaraokePage() {
           {/* Section 2: Current & Next Singers indicator */}
           <div className="session-context-section">
             <span className="eyebrow" style={{ marginBottom: '10px' }}>
-              <Mic size={12} /> {isRandomRoom ? 'BÀI ĐANG & TIẾP THEO' : 'CA SĨ ĐANG & TIẾP THEO'}
+              <Mic size={12} /> BÀI ĐANG & TIẾP THEO
             </span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {spotlightSong && (
@@ -1140,7 +1168,7 @@ export function KaraokePage() {
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {spotlightSong.song?.title}
                   </div>
-                  {isRandomRoom
+                  {isRandomSong(spotlightSong)
                     ? playlistSourceButton(spotlightSong, true)
                     : <SingerPair
                         singer1={spotlightSong.singer_1_id ? profileById.get(spotlightSong.singer_1_id) : undefined}
@@ -1160,7 +1188,7 @@ export function KaraokePage() {
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {subsequentQueue[0].song?.title}
                   </div>
-                  {isRandomRoom
+                  {isRandomSong(subsequentQueue[0])
                     ? playlistSourceButton(subsequentQueue[0], true)
                     : <SingerPair
                         singer1={subsequentQueue[0].singer_1_id ? profileById.get(subsequentQueue[0].singer_1_id) : undefined}
@@ -1226,10 +1254,22 @@ export function KaraokePage() {
                 <span>{isRandomRoom ? 'Bốc ngẫu nhiên thêm 50 bài' : 'Thêm 50 bài vào hàng chờ'}</span>
               </button>
 
+              {!isRandomRoom && <button
+                className="btn-secondary random-queue-button is-sidebar"
+                disabled={busy}
+                onClick={() => void generateNext(false, 'RANDOM')}
+              >
+                <Shuffle size={15} />
+                <span>Lên 50 bài ngẫu nhiên</span>
+              </button>}
+
               <button
                 className="btn-secondary"
                 disabled={busy}
-                onClick={() => setConfirmRecycle(true)}
+                onClick={() => {
+                  setRecycleModeTarget(room.session.selection_mode);
+                  setConfirmRecycle(true);
+                }}
                 style={{ width: '100%', justifyContent: 'flex-start', padding: '9px 14px', fontSize: '0.84rem' }}
               >
                 <RefreshCw size={15} color="var(--neon-purple)" />
@@ -1262,14 +1302,17 @@ export function KaraokePage() {
       <ConfirmDialog
         isOpen={confirmRecycle}
         title="Không còn bài hát mới"
-        description={isRandomRoom
+        description={(recycleModeTarget ?? room.session.selection_mode) === 'RANDOM'
           ? 'Buổi hát này đã dùng hết các bài trong playlist của những người tham dự. Bạn có muốn bốc ngẫu nhiên lại các bài trước đó không?'
           : 'Buổi hát này đã dùng hết tất cả các bài hát song ca chung của những người tham dự. Bạn có muốn tạo lượt tiếp bằng cách dùng lại các bài trước đó không?'}
         confirmLabel="Dùng lại bài trước"
         cancelLabel="Hủy"
         variant="warning"
-        onConfirm={() => void generateNext(true)}
-        onCancel={() => setConfirmRecycle(false)}
+        onConfirm={() => void generateNext(true, recycleModeTarget ?? room.session.selection_mode)}
+        onCancel={() => {
+          setConfirmRecycle(false);
+          setRecycleModeTarget(null);
+        }}
       />
 
       {/* Complete Session Confirmation Dialog */}
@@ -1295,24 +1338,24 @@ export function KaraokePage() {
             style={{ maxWidth: '420px' }}
           >
             <h3 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-display)', marginBottom: '8px' }}>
-              {isRandomRoom ? 'Bài này có trong playlist của ai?' : 'Thông tin đề xuất bài hát'}
+              {isRandomSong(inspectionSong) ? 'Bài này có trong playlist của ai?' : 'Thông tin đề xuất bài hát'}
             </h3>
             <p style={{ fontWeight: 700, color: 'var(--neon-cyan)', marginBottom: '14px' }}>
               {inspectionSong.song?.title}
             </p>
 
             <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {!isRandomRoom && <div>
+              {!isRandomSong(inspectionSong) && <div>
                 <strong>{inspectionSong.singer_2_id ? 'Cặp song ca:' : 'Ca sĩ solo:'}</strong> {performerNames(inspectionSong)}
               </div>}
               <div>
-                <strong>{isRandomRoom ? 'Có trong playlist của:' : 'Người cùng biết hát:'}</strong>{' '}
+                <strong>{isRandomSong(inspectionSong) ? 'Có trong playlist của:' : 'Người cùng biết hát:'}</strong>{' '}
                 {playlistOwnerNames(inspectionSong).join(', ')}
               </div>
-              {!isRandomRoom && <div>
+              {!isRandomSong(inspectionSong) && <div>
                 <strong>Điểm cân bằng:</strong> {Math.round(inspectionSong.score)}
               </div>}
-              {isRandomRoom && <div>
+              {isRandomSong(inspectionSong) && <div>
                 Chế độ ngẫu nhiên chỉ chọn bài hát, không phân công ai hát hoặc hát cùng ai.
               </div>}
             </div>

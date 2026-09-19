@@ -6,6 +6,7 @@ const hardeningSql = readFileSync(new URL('../../supabase/migrations/20260919062
 const featureSql = readFileSync(new URL('../../supabase/migrations/20260919101503_20260919_group_dissolution_and_random_mode.sql', import.meta.url), 'utf8');
 const modeGuardSql = readFileSync(new URL('../../supabase/migrations/20260919110253_enforce_session_selection_mode.sql', import.meta.url), 'utf8');
 const randomQueueSql = readFileSync(new URL('../../supabase/migrations/20260919193000_random_song_queue_without_assignments.sql', import.meta.url), 'utf8');
+const mixedModeSql = readFileSync(new URL('../../supabase/migrations/20260919203000_allow_mixed_queue_modes.sql', import.meta.url), 'utf8');
 
 describe('authenticated migration security contract', () => {
   it('enables RLS on every exposed application table', () => {
@@ -78,5 +79,14 @@ describe('authenticated migration security contract', () => {
     expect(randomQueueSql).toContain('RANDOM sessions must not assign singers');
     expect(randomQueueSql).toContain('cardinality(eligible_singer_ids) >= 1');
     expect(randomQueueSql).toContain('Every eligible singer must have the song in their playlist');
+  });
+
+  it('allows random batches inside an active smart room without weakening singer rules', () => {
+    expect(mixedModeSql).toContain('drop trigger if exists recommendation_batches_validate_mode');
+    expect(mixedModeSql).toContain('from public.recommendation_batches');
+    expect(mixedModeSql).toContain("batch_mode = 'SMART'");
+    expect(mixedModeSql).toContain("batch_mode = 'RANDOM'");
+    expect(mixedModeSql).toContain('RANDOM batches must not assign singers');
+    expect(mixedModeSql).toContain('Every eligible singer must have the song in their playlist');
   });
 });

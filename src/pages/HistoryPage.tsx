@@ -75,6 +75,16 @@ export function HistoryPage() {
             const data = details[session.id];
             const played = data?.songs.filter(song => song.state === 'PLAYED') ?? [];
             const names = new Map(data?.members.map(member => [member.id, member.display_name]) ?? []);
+            const batchModes = new Map(data?.batches.map(batch => [batch.id, batch.selection_mode]) ?? []);
+            const songIsRandom = (batchId: string) =>
+              (batchModes.get(batchId) ?? session.selection_mode) === 'RANDOM';
+            const hasRandom = data
+              ? data.batches.some(batch => batch.selection_mode === 'RANDOM')
+              : session.selection_mode === 'RANDOM';
+            const hasSmart = data
+              ? data.batches.some(batch => batch.selection_mode === 'SMART')
+              : session.selection_mode === 'SMART';
+            const randomOnly = hasRandom && !hasSmart;
             const stats = data
               ? calculateSessionStats(
                   data.members.map(member => member.id),
@@ -118,9 +128,9 @@ export function HistoryPage() {
                           <Mic size={10} /> Đang diễn ra
                         </span>
                       )}
-                      {session.selection_mode === 'RANDOM' && (
+                      {hasRandom && (
                         <span className="badge badge-amber" style={{ fontSize: '0.7rem', padding: '2px 8px' }}>
-                          Ngẫu nhiên
+                          {hasSmart ? 'Có bài ngẫu nhiên' : 'Ngẫu nhiên'}
                         </span>
                       )}
                     </div>
@@ -180,7 +190,7 @@ export function HistoryPage() {
                         {/* Smart sessions track assigned turns; random sessions only track source playlists. */}
                         <div style={{ marginBottom: '14px' }}>
                           <div style={{ fontSize: '0.72rem', color: 'var(--cyan-400)', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '8px' }}>
-                            {session.selection_mode === 'RANDOM'
+                            {randomOnly
                               ? 'PLAYLIST NGUỒN ĐÃ CHỌN:'
                               : 'LƯỢT HÁT CỦA CÁC THÀNH VIÊN:'}
                           </div>
@@ -201,7 +211,7 @@ export function HistoryPage() {
                               >
                                 <MemberAvatar profile={member} size="xs" />
                                 <span>{member.display_name}</span>
-                                {session.selection_mode !== 'RANDOM' && <strong style={{ color: 'var(--neon-cyan)' }}>
+                                {!randomOnly && <strong style={{ color: 'var(--neon-cyan)' }}>
                                   {stats?.turnsByMember[member.id] ?? 0} lượt
                                 </strong>}
                               </div>
@@ -252,7 +262,7 @@ export function HistoryPage() {
                                       whiteSpace: 'nowrap',
                                     }}
                                   >
-                                    {session.selection_mode === 'RANDOM'
+                                    {songIsRandom(song.batch_id)
                                       ? `Có trong: ${song.eligible_singer_ids.map(id => names.get(id)).filter(Boolean).join(', ')}`
                                       : song.singer_1_id
                                         ? `${names.get(song.singer_1_id)}${song.singer_2_id ? ` + ${names.get(song.singer_2_id)}` : ' · Solo'}`
@@ -283,7 +293,7 @@ export function HistoryPage() {
                           }}
                         >
                           <Users size={13} color="var(--neon-purple)" />
-                          {session.selection_mode === 'RANDOM' ? (
+                          {randomOnly ? (
                             <span>{data.members.length} playlist nguồn · Không phân công người hát</span>
                           ) : <>
                             <span>{Object.keys(stats?.pairCounts ?? {}).length} cặp khác nhau</span>
